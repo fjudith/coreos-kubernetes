@@ -14,6 +14,7 @@ $controller_count = 1
 $controller_vm_memory = 2048
 $worker_count = 1
 $worker_vm_memory = 2048
+$worker_vm_cpu = 1
 $etcd_count = 1
 $etcd_vm_memory = 512
 $node_disks = 3
@@ -199,10 +200,12 @@ Vagrant.configure("2") do |config|
 
       worker.vm.provider :virtualbox do |vb|
         vb.memory = $worker_vm_memory
+        vb.cpus = $worker_vm_cpu
       end
 
       worker.vm.provider :parallels do |vb|
         vb.memory = $worker_vm_memory
+        vb.cpus = $worker_vm_cpu
       end
 
       workerIP = workerIP(i)
