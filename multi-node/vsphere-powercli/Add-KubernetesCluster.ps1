@@ -115,7 +115,7 @@ PROCESS{
     # Root CA
     ##################################################
     Write-Verbose -Message "Generating Root CA"
-    New-Item -Force -Type 'Directory' -Path "${pwd}\ssl"
+    New-Item -Force -Type 'Directory' -Path "${pwd}\ssl" > $Null
     .\Lib\Write-SSLCA.ps1 -OutputPath "${pwd}\ssl"
 
     # Admin certificate
@@ -136,7 +136,7 @@ PROCESS{
         $EtcdIP = Get-EtcdIP -Subnet $EtcdSubnet -Number $($i +1)
         
         $EtcdConfigPath = "${pwd}\conf\etcd\$EtcdName\openstack\latest\user-data"
-        New-Item -Force -ItemType 'Directory' -Path $(([System.IO.fileInfo]$EtcdConfigPath).DirectoryName)
+        New-Item -Force -ItemType 'Directory' -Path $(([System.IO.fileInfo]$EtcdConfigPath).DirectoryName) > $Null
 
         $EtcdConfig = $(Get-Content -Path "${pwd}\etcd-cloud-config.yaml") -Replace '\{\{ETCD_NODE_NAME\}\}',$EtcdName
         $EtcdConfig = $EtcdConfig -Replace '\{\{ETCD_INITIAL_CLUSTER\}\}',$InitialEtcdCluster
@@ -154,8 +154,7 @@ PROCESS{
         $GuestInfo += $CommonGuestInfo
 
         Import-CoreOS -Name "${EtcdName}" -DataStore "${DataStore}" -Cluster "${Cluster}" -PortGroup "${PortGroup}" -DiskStorageFormat "${DiskstorageFormat}"
-        Write-CoreOSCloudConfig -Name "${EtcdName}" -GuestInfo $GuestInfo -CloudConfigPath "${EtcdConfigPath}" -Cluster "${Cluster}"
-        
+        Write-CoreOSCloudConfig -Name "${EtcdName}" -GuestInfo $GuestInfo -CloudConfigPath "${EtcdConfigPath}" -Cluster "${Cluster}"   
     }
 
 

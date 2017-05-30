@@ -1,8 +1,19 @@
 PARAM(
-	[parameter(mandatory=$True)][String]$OutputPath,
-    [parameter(mandatory=$True)][String]$Name,
-    [parameter(mandatory=$True)][String]$CommonName,
-    [parameter(mandatory=$False)][String[]]$SubjectAlternativeName
+	[parameter(mandatory=$True)]
+    [String]
+    $OutputPath,
+    
+    [parameter(mandatory=$True)]
+    [String]
+    $Name,
+    
+    [parameter(mandatory=$True)]
+    [String]
+    $CommonName,
+    
+    [parameter(mandatory=$False)]
+    [String[]]
+    $SubjectAlternativeName
 )
 BEGIN{
     $ErrorActionPreference = 'stop'

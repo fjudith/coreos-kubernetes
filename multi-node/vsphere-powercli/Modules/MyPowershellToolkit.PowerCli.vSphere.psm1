@@ -26,12 +26,15 @@ Function Update-Coreos{
 
             $Compare = Invoke-WebRequest -Method 'GET' -URI $Digests
 
+            Write-Host -NoNewline -Object "CoreOS OVA `"$UpdateChannel`" status ["
             If($Compare.RawContent -Match $Hash){
-                Write-Host -Object "CoreOS Update OVA Alreday up-to-date" -ForegroundColor 'green'
+                Write-Host -NoNewLine -ForegroundColor 'green' -Object "Up-To-Date"
+                Write-Host -Object "]"
             }
             Else{
-                Write-Host -Object "Updating CoreOS OVA File channel:`"$UpdateChannel`"" -Foreground 'orange'
-                
+                Write-Host -NoNewLine -ForegroundColor 'yellow' -Object "Updating"
+                Write-Host -Object "]"
+
                 Remove-Item -Force -Path $Destination
 
                 #Invoke-WebRequest -Uri $URI -OutFile $Destination
@@ -41,7 +44,8 @@ Function Update-Coreos{
         Else{
             # If not exists then
             # Create desitnation directory and download file
-            Write-Host -Object "Downloading CoreOS OVA" -ForegroundColor 'magenta'
+            Write-Host -NoNewLine -ForegroundColor 'magenta' -Object "Downloading"
+            Write-Host -Object "]"
 
             New-Item -Force -ItemType 'Directory' -Path  $([System.IO.FileInfo]$OVAPath).DirectoryName
             Invoke-WebRequest -Uri $URI -OutFile $OVAPath
@@ -101,13 +105,15 @@ Function Import-CoreOS{
             $ClusterHosts = Get-cluster -Name "${Cluster}" | Get-VMHost
             $Rand = Get-Random -Minimum 0 -Maximum ($ClusterHosts.Length -1)
             
-            Write-Host -Object "Elected cluster host:`"$($($ClusterHosts)[$Rand].Name)`"" -ForegroundColor 'Green'
-
+            Write-Host -NoNewLine -Object "${Name}: Elected cluster host ["
+            Write-Host -NoNewLine -ForegroundColor 'green' -Object "$($($ClusterHosts)[$Rand].Name)"
+            Write-Host -Object "]"
+            
             $VMHostObject = Get-VMHost -Name $($($ClusterHosts)[$Rand].Name)
         }
         
         $Datastore = Get-Datastore -Name $Datastore
-        $VMHostObject | Import-vApp -Source $OVAPath -Name $Name -DataStore $Datastore -DiskStorageFormat $DiskStorageFormat
+        $VMHostObject | Import-vApp -Source $OVAPath -Name $Name -DataStore $Datastore -DiskStorageFormat $DiskStorageFormat > $Null
 
         # Distables vApp/Ovfenv if connected to a vCenter instance as CoreOS OVA computes "ovfenv" first.
         If($(Get-VMHost).Length -gt 1){
@@ -123,7 +129,7 @@ Function Import-CoreOS{
         # Assign Portgroup to network interface
         $NetWorkAdapters = Get-VMHost -Name $VMHostObject | Get-VM -Name $Name | Get-NetworkAdapter -Name 'Network Adapter 1'
         $PortGroupObject = Get-VMHost -Name $VMHostObject | Get-VirtualPortGroup -Name $PortGroup
-        Set-NetworkAdapter -NetworkAdapter $NetWorkAdapters -Portgroup $PortGroupObject -Confirm:$False
+        Set-NetworkAdapter -NetworkAdapter $NetWorkAdapters -Portgroup $PortGroupObject -Confirm:$False > $Null
     }
 }
 
@@ -176,7 +182,7 @@ Function Write-CoreOSCloudConfig{
 
         If (Get-PSDrive | Where-Object { $_.Name -eq $Datastore.Name}) { Remove-PSDrive -Name $Datastore.Name }
         
-        New-PSDrive -Location $Datastore -Name $Datastore.Name -PSProvider VimDatastore -Root "\"
+        New-PSDrive -Location $Datastore -Name $Datastore.Name -PSProvider VimDatastore -Root "\" > $Null
         Copy-DatastoreItem -Item $vmxRemote -Destination $vmxTemp > $Null
 
         # Cleanup existing guestinfo.coreos.config.* data
@@ -200,17 +206,23 @@ Function Write-CoreOSCloudConfig{
         Copy-DatastoreItem -Item $vmxTemp -Destination $vmxRemote
 
         # Power-On virtaul machine and watch for VMware Tools status
-        $vm | Start-VM
+        $vm | Start-VM > $Null
         $status = "toolsNotRunning"
         while ($status -eq "toolsNotRunning")
         {
             Start-Sleep -Seconds 1
             $status = (Get-VM -name $Name | Get-View).Guest.ToolsStatus
             
-            Write-Output -InputObject $Status
+            Write-Host -NoNewline -Object "${Name}: VMware Tools Status [" 
+            Write-Host -NoNewline -ForegroundColor 'yellow' -Object $Status
+            Write-Host -Object "]" 
         }
     }
     END {
-        Remove-PSDrive -Name $Datastore.Name
+        Write-Host -NoNewline -Object "${Name}: VMware Tools Status [" 
+        Write-Host -NoNewline -ForegroundColor 'green' -Object $Status
+        Write-Host -Object "]" 
+
+        Remove-PSDrive -Name $Datastore.Name > $Null
     }
 }

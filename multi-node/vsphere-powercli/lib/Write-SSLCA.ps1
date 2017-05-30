@@ -1,5 +1,7 @@
 PARAM(
-    [parameter(mandatory=$True)]$OutputPath
+    [parameter(mandatory=$True)]
+    [String]
+    $OutputPath
 )
 BEGIN{
     $ErrorActionPreference = 'stop'
