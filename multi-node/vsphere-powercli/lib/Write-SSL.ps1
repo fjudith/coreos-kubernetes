@@ -35,12 +35,12 @@ DNS.2 = kubernetes.default
 DNS.3 = kubernetes.default.svc
 DNS.4 = kubernetes.default.svc.cluster.local"
 
-    $ConfigFile="${OutputPath}/${Name}-req.cnf"
-    $CAFile="${OutputPath}/ca.pem"
-    $CAKeyFile="${OutputPath}/ca-key.pem"
-    $KeyFile="${OutputPath}/${Name}-key.pem"
-    $CSRFile="${OutputPath}/${Name}.csr"
-    $PEMFile="${OutputPath}/${Name}.pem"
+    $ConfigFile="${OutputPath}\${Name}-req.cnf"
+    $CAFile="${OutputPath}\ca.pem"
+    $CAKeyFile="${OutputPath}\ca-key.pem"
+    $KeyFile="${OutputPath}\${Name}-key.pem"
+    $CSRFile="${OutputPath}\${Name}.csr"
+    $PEMFile="${OutputPath}\${Name}.pem"
 
     $Contents="${CAFile} ${KeyFile} ${PEMFile}"
 }

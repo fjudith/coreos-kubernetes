@@ -7,8 +7,8 @@ coreos:
     reboot-strategy: "off"
 
   etcd2:
-    name: {{ETCD_NODE_NAME}}
-    initial-cluster: {{ETCD_INITIAL_CLUSTER}}
+    name: k8setcd001
+    initial-cluster: k8setcd001=http://192.168.251.51:2380,k8setcd002=http://192.168.251.52:2380,k8setcd003=http://192.168.251.53:2380
     advertise-client-urls: http://$private_ipv4:2379
     listen-client-urls: http://0.0.0.0:2379
     initial-advertise-peer-urls: http://$private_ipv4:2380

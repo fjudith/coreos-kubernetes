@@ -1,24 +1,49 @@
 PARAM(
+    [parameter(mandatory=$false)][String]$VMHost,
+    [parameter(mandatory=$false)][String]$Cluster ='Cluster-Prod',
+    [parameter(mandatory=$false)][String]$PortGroup = 'fre-server',
+    [parameter(mandatory=$false)][String]$Datastore = 'FAS01_PROD_SATA_04',
+    [parameter(mandatory=$false)][String]$DiskStorageFormat = 'thin',
+
     [parameter(mandatory=$false)][String]$UpdateChannel = 'beta',
-
-    # Kubernetes Controller configuration
-    [parameter(mandatory=$false)][Int]$ControllerCount = 3,
-    [parameter(mandatory=$false)][Int]$ControllerVMMemory = 2048,
-
-    # Kubernetes Worker configuration
-    [parameter(mandatory=$false)][Int]$WorkerCount = 6,
-    [parameter(mandatory=$false)][Int]$WorkerVMMemory = 2048,
-    [parameter(mandatory=$false)][Int]$WorkerVMCpu = 1,
 
     # Etcd configuration
     [parameter(mandatory=$false)][Int]$EtcdCount = 3,
     [parameter(mandatory=$false)][Int]$EtcdVMMemory = 512,
+    [parameter(mandatory=$false)][String]$EtcdSubnet = '192.168.251.0',
+    [parameter(mandatory=$false)][Int]$EtcdCIDR = 24,
+    [parameter(mandatory=$false)][String]$EtcdGateway = '192.168.251.254',
+
+    # Kubernetes Controller configuration
+    [parameter(mandatory=$false)][Int]$ControllerCount = 1,
+    [parameter(mandatory=$false)][Int]$ControllerVMMemory = 2048,
+    [parameter(mandatory=$false)][String]$ControllerSubnet = '192.168.251.0',
+    [parameter(mandatory=$false)][Int]$ControllerCIDR = 24,
+    [parameter(mandatory=$false)][String]$ControllerGateway = '192.168.251.254',
+
+    # Kubernetes Worker configuration
+    [parameter(mandatory=$false)][Int]$WorkerCount = 1,
+    [parameter(mandatory=$false)][Int]$WorkerVMMemory = 2048,
+    [parameter(mandatory=$false)][Int]$WorkerVMCpu = 1,
+    [parameter(mandatory=$false)][String]$WorkerSubnet = '192.168.251.0',
+    [parameter(mandatory=$false)][Int]$WorkerCIDR = 24,
+    [parameter(mandatory=$false)][String]$WorkerGateway = '192.168.251.254',
 
     # Disk configuration
     [parameter(mandatory=$false)][Int]$NodeDisks = 3,
-    [parameter(mandatory=$false)][Int]$DiskSize = 5
+    [parameter(mandatory=$false)][Int]$DiskSize = 5,
+
+    # Common Network Properties
+    [parameter(mandatory=$false)][hashtable]$CommonGuestInfo = @{
+        'guestinfo.dns.server.0' = '192.168.1.1';
+        'guestinfo.dns.server.1' = '192.168.1.2';
+    }
 )
 BEGIN{
+    # Import Powercli 6.3 Module
+    Import-Module -Force -Name 'VMware.VimAutomation.Core'
+    Import-Module -Force -Name "${pwd}\Modules\MyPowershellToolkit.Powercli.vSphere.psm1"
+
     # Load Machine configuration from config
     $Config = ([System.IO.FileInfo]"${pwd}\config.rb").FullName
     If (Test-Path $Config)
@@ -38,33 +63,36 @@ BEGIN{
     $ControllerCloudConfigPath = ([System.IO.FileInfo]"${pwd}\..\generic\controller-install.sh").FullName
     $WorkerCloudConfigPath = ([System.IO.FileInfo]"${pwd}\..\generic\worker-install.sh").FullName
 
-    Function Get-EtcdIP([int]$Number){
-        Write-Output -InputObject "172.17.4.$($Number + 50)"
+    Function Get-EtcdIP([string]$Subnet,[int]$Number){
+        $Subnet -Match '^(?<BeginIP>\d{1,3}\.\d{1,3}\.\d{1,3})\.\d{1,3}$' >> $Null
+        Write-Output -InputObject "$($Matches.BeginIP).$($Number + 50)"
     }
 
-    Function Get-ControllerIP([int]$Number){
-        Write-Output -InputObject "172.17.4.$($Number + 100)"
+    Function Get-ControllerIP([string]$Subnet,[int]$Number){
+        $Subnet -Match '^(?<BeginIP>\d{1,3}\.\d{1,3}\.\d{1,3})\.\d{1,3}$' >> $Null
+        Write-Output -InputObject "$($Matches.BeginIP).$($Number + 100)"
     }
 
-    Function Get-WorkerIP([int]$Number){
-        Write-Output -InputObject "172.17.4.$($Number + 200)"
+    Function Get-WorkerIP([string]$Subnet,[int]$Number){
+        $Subnet -Match '^(?<BeginIP>\d{1,3}\.\d{1,3}\.\d{1,3})\.\d{1,3}$' >> $Null
+        Write-Output -InputObject "$($Matches.BeginIP).$($Number + 200)"
     }
 
     # Building array of Controller IP addresses as per given controller count
     # Adding Controller Cluster IP address at the end of the list
     $ControllerIPs = @()
-    For($i =1 ; $i -le $ControllerCount; $i++){$ControllerIPs += Get-ControllerIP -Number $i}
+    For($i =1 ; $i -le $ControllerCount; $i++){$ControllerIPs += Get-ControllerIP -Subnet $ControllerSubnet -Number $i}
     $ControllerIPs += $ControllerClusterIP
     Write-Verbose -Message "Controller IPs:`"$ControllerIPs`""
 
     # Building array of Etcd IP addresses as per given etcd count
     $EtcdIPs = @()
-    For($i = 1 ; $i -le $EtcdCount; $i++){$EtcdIPs += Get-EtcdIP -Number $i}
+    For($i = 1 ; $i -le $EtcdCount; $i++){$EtcdIPs += Get-EtcdIP -Subnet $EtcdSubnet -Number $i}
     
 
     # Building a single string for Etcd Cluster Node list containing Etcd hostnames and URLs as per given etcd count
     $InitialEtcdCluster = @()
-    For($i = 0 ; $i -lt $EtcdIPs.Length; $i++){$InitialEtcdCluster += "e$($i +1)=http://$($EtcdIPs[$i]):2380"}
+    For($i = 0 ; $i -lt $EtcdIPs.Length; $i++){$InitialEtcdCluster += "k8setcd$("{0:D3}" -f $($i +1))=http://$($EtcdIPs[$i]):2380"}
     $InitialEtcdCluster = $InitialEtcdCluster -Join ','
     Write-Verbose "Initial Etcd Cluster:`"$InitialEtcdCluster`""
 
@@ -79,7 +107,7 @@ BEGIN{
         $IPString = @()
         For($i = 0 ; $i -lt $IpAddresses.Length; $i++){$IPString += "IP.$($i +1) = $($IpAddresses[$i])"}
         
-        .\Lib\Write-SSL.ps1 -OutputPath "$(pwd)\ssl" -Name "${CertificateBaseName}" -CommonName "${CommonName}" -SubjectAlternativeName $IpString
+        .\Lib\Write-SSL.ps1 -OutputPath "${pwd}\ssl" -Name "${CertificateBaseName}" -CommonName "${CommonName}" -SubjectAlternativeName $IpString
     }
 }  
 PROCESS{
@@ -96,20 +124,47 @@ PROCESS{
     .\Lib\Write-SSL.ps1 -OutputPath "$(pwd)\ssl" -Name 'admin' -CommonName 'kube-admin'
 
     # OVA Download
-    $OVAPath = ".\.ova\coreos_production_vmware_ova.ova"
-    If(-Not $(Test-Path $OVAPath)){
-        $FileInfo = [System.IO.FileInfo]$OVAPath
-        New-Item -Force -ItemType 'Directory' -Path  $($File.Directory)
+    ##################################################
+    $OVAPath = "$(pwd)\.ova\coreos_production_vmware_ova.ova"
+    Update-CoreOs -UpdateChannel $UpdateChannel -Destination $OVAPath
 
-        Invoke-WebRequest -Uri "https://${UpdateChannel}.release.core-os.net/amd64-usr/current/coreos_production_vmware_ova.ova" -OutFile $OVAPath
+    # Etcd
+    ##################################################
+    Write-Verbose -Message "Provisionning ETCd hosts"
+    For($i = 0; $i -lt $EtcdCount; $i++){
+        $EtcdName = "k8setcd$("{0:D3}" -f $($i +1))"
+        $EtcdIP = Get-EtcdIP -Subnet $EtcdSubnet -Number $($i +1)
+        
+        $EtcdConfigPath = "${pwd}\conf\etcd\$EtcdName\openstack\latest\user-data"
+        New-Item -Force -ItemType 'Directory' -Path $(([System.IO.fileInfo]$EtcdConfigPath).DirectoryName)
+
+        $EtcdConfig = $(Get-Content -Path "${pwd}\etcd-cloud-config.yaml") -Replace '\{\{ETCD_NODE_NAME\}\}',$EtcdName
+        $EtcdConfig = $EtcdConfig -Replace '\{\{ETCD_INITIAL_CLUSTER\}\}',$InitialEtcdCluster
+        Set-Content -Path $EtcdConfigPath -Value $EtcdConfig
+
+        $GuestInfo = @{
+            'guestinfo.hostname' = "${EtcdName}";
+            'guestinfo.interface.0.name' = 'ens192';
+            'guestinfo.interface.0.dhcp' = 'no';
+            'guestinfo.interface.0.role' = 'private';
+            'guestinfo.interface.0.ip.0.address' = "${EtcdIP}/${EtcdCIDR}";
+            'guestinfo.interface.0.route.0.gateway' = "${EtcdGateway}";
+            'guestinfo.interface.0.route.0.destination' = '0.0.0.0/0'
+        }
+        $GuestInfo += $CommonGuestInfo
+
+        Import-CoreOS -Name "${EtcdName}" -DataStore "${DataStore}" -Cluster "${Cluster}" -PortGroup "${PortGroup}" -DiskStorageFormat "${DiskstorageFormat}"
+        Write-CoreOSCloudConfig -Name "${EtcdName}" -GuestInfo $GuestInfo -CloudConfigPath "${EtcdConfigPath}" -Cluster "${Cluster}"
+        
     }
+
 
     # Controller
     ##################################################
     Write-Verbose -Message "Controller certificates"
     For($i = 0; $i -lt $ControllerCount; $i++){
-        $ControllerName = "k8scon$("{0:D3}" -f $($i +1))"
-        $ControllerIP = Get-ControllerIP -Number $($i +1)
+        $ControllerName = "k8sctrl$("{0:D3}" -f $($i +1))"
+        $ControllerIP = Get-ControllerIP -Subnet $ControllerSubnet -Number $($i +1)
 
         Write-MachineSSL -Machine $ControllerName -CertificateBaseName 'apiserver' -CommonName "kube-apiserver-${ControllerIP}" -IpAddresses $ControllerIPs
     }
@@ -118,8 +173,8 @@ PROCESS{
     ##################################################
     Write-Verbose -Message "Worker certificates"
     For($i = 0; $i -lt $WorkerCount; $i++){
-        $WorkerName = "k8scon$("{0:D3}" -f $($i +1))"
-        $WorkerIP = Get-WorkerIP -Number $($i +1)
+        $WorkerName = "k8swork$("{0:D3}" -f $($i +1))"
+        $WorkerIP = Get-WorkerIP -Subnet $WorkerSubnet -Number $($i +1)
 
         Write-MachineSSL -Machine $WorkerName -CertificateBaseName 'worker' -CommonName "kube-worker-${WorkerIP}" -IpAddresses $WorkerIP
     }
