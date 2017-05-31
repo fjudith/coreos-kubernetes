@@ -40,6 +40,7 @@ PARAM(
     }
 )
 BEGIN{
+    $ErrorActionPreference = 'stop'
     # Import Powercli 6.3 Module
     Import-Module -Force -Name 'VMware.VimAutomation.Core'
     Import-Module -Force -Name "${pwd}\Modules\MyPowershellToolkit.Powercli.vSphere.psm1"
@@ -64,17 +65,20 @@ BEGIN{
     $WorkerCloudConfigPath = ([System.IO.FileInfo]"${pwd}\..\generic\worker-install.sh").FullName
 
     Function Get-EtcdIP([string]$Subnet,[int]$Number){
-        $Subnet -Match '^(?<BeginIP>\d{1,3}\.\d{1,3}\.\d{1,3})\.\d{1,3}$' >> $Null
+        $Subnet -Match '^(?<BeginIP>\d{1,3}\.\d{1,3}\.\d{1,3})\.\d{1,3}$' > $Null
+
         Write-Output -InputObject "$($Matches.BeginIP).$($Number + 50)"
     }
 
     Function Get-ControllerIP([string]$Subnet,[int]$Number){
-        $Subnet -Match '^(?<BeginIP>\d{1,3}\.\d{1,3}\.\d{1,3})\.\d{1,3}$' >> $Null
+        $Subnet -Match '^(?<BeginIP>\d{1,3}\.\d{1,3}\.\d{1,3})\.\d{1,3}$' > $Null
+
         Write-Output -InputObject "$($Matches.BeginIP).$($Number + 100)"
     }
 
     Function Get-WorkerIP([string]$Subnet,[int]$Number){
-        $Subnet -Match '^(?<BeginIP>\d{1,3}\.\d{1,3}\.\d{1,3})\.\d{1,3}$' >> $Null
+        $Subnet -Match '^(?<BeginIP>\d{1,3}\.\d{1,3}\.\d{1,3})\.\d{1,3}$' > $Null
+
         Write-Output -InputObject "$($Matches.BeginIP).$($Number + 200)"
     }
 
@@ -121,11 +125,11 @@ PROCESS{
     # Admin certificate
     ##################################################
     Write-Verbose -Message "Admin certficicate"
-    .\Lib\Write-SSL.ps1 -OutputPath "$(pwd)\ssl" -Name 'admin' -CommonName 'kube-admin'
+    .\Lib\Write-SSL.ps1 -OutputPath "${pwd}\ssl" -Name 'admin' -CommonName 'kube-admin'
 
     # OVA Download
     ##################################################
-    $OVAPath = "$(pwd)\.ova\coreos_production_vmware_ova.ova"
+    $OVAPath = "${pwd}\.ova\coreos_production_vmware_ova.ova"
     Update-CoreOs -UpdateChannel $UpdateChannel -Destination $OVAPath
 
     # Etcd
@@ -136,6 +140,7 @@ PROCESS{
         $EtcdIP = Get-EtcdIP -Subnet $EtcdSubnet -Number $($i +1)
         
         $EtcdConfigPath = "${pwd}\conf\etcd\$EtcdName\openstack\latest\user-data"
+
         New-Item -Force -ItemType 'Directory' -Path $(([System.IO.fileInfo]$EtcdConfigPath).DirectoryName) > $Null
 
         $EtcdConfig = $(Get-Content -Path "${pwd}\etcd-cloud-config.yaml") -Replace '\{\{ETCD_NODE_NAME\}\}',$EtcdName

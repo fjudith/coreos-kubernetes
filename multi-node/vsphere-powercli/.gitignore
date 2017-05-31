@@ -1,4 +1,3 @@
 .ova
-config.rb
 ssl/
-conf/
+conf/*
