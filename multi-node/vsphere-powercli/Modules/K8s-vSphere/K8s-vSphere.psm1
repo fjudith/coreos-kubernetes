@@ -14,6 +14,17 @@ Function Update-Coreos{
         # Download URL
         $URI = "https://${UpdateChannel}.release.core-os.net/amd64-usr/current/coreos_production_vmware_ova.ova"
         $Digests = "https://${UpdateChannel}.release.core-os.net/amd64-usr/current/coreos_production_vmware_ova.DIGESTS"
+
+        # Test Internet Access
+        Write-Host -NoNewline -Object "Internet access status ["
+        Try{
+            Invoke-WebRequest -URI "https://${UpdateChannel}.release.core-os.net" > $Null
+            Write-Host -NoNewline -ForegroundColor 'green' -Object 'Connected'
+        }
+        Catch{
+            Write-Host -NoNewline -ForegroundColor 'red' -Object 'Not Connected'
+        }
+        Write-Host -Object "]"
     }
     PROCESS{
         # Test if OVA already downloaded
@@ -37,18 +48,19 @@ Function Update-Coreos{
 
                 Remove-Item -Force -Path $Destination
 
-                #Invoke-WebRequest -Uri $URI -OutFile $Destination
+                
                 Start-BitsTransfer -Source $URI -Destination $Destination
             }        
         }
         Else{
             # If not exists then
             # Create desitnation directory and download file
-            Write-Host -NoNewLine -ForegroundColor 'magenta' -Object "Downloading"
+            Write-Host -NoNewLine -Object "CoreOS OVA `"$UpdateChannel`" status ["
+            Write-Host -NoNewLine -ForegroundColor 'Yellow' -Object "Downloading"
             Write-Host -Object "]"
 
-            New-Item -Force -ItemType 'Directory' -Path  $([System.IO.FileInfo]$OVAPath).DirectoryName
-            Invoke-WebRequest -Uri $URI -OutFile $OVAPath
+            New-Item -Force -ItemType 'Directory' -Path  $([System.IO.FileInfo]$Destination).DirectoryName > $Null
+            Invoke-WebRequest -Uri $URI -OutFile $Destination
         }
 
     }
@@ -89,7 +101,7 @@ Function Import-CoreOS{
 
     )
     BEGIN{
-        Import-Module -Force -Name 'VMware.VimAutomation.Core'
+        Import-Module -Name 'VMware.VimAutomation.Core'
 
         If(-Not $(Test-Path -Path $OVAPath)){
             Update-CoreOS
@@ -164,7 +176,6 @@ Function Write-CoreOSCloudConfig{
         $cc = Get-Content -Path "${CloudConfigPath}" -Raw
         $b = [System.Text.Encoding]::UTF8.GetBytes($cc)
         $EncodedText = [System.Convert]::ToBase64String($b)
-        #$EncodedText = & "C:\Program Files\Git\usr\bin\base64.exe" -w0 "$CloudConfigPath"
 
         # Get virtual machine object
         If($Cluster)    {$vm = Get-Cluster -Name $Cluster | Get-VM -Name $Name}
@@ -185,6 +196,7 @@ Function Write-CoreOSCloudConfig{
         New-PSDrive -Location $Datastore -Name $Datastore.Name -PSProvider VimDatastore -Root "\" > $Null
         Copy-DatastoreItem -Item $vmxRemote -Destination $vmxTemp > $Null
 
+        # Inject new cloud-config data
         # Cleanup existing guestinfo.coreos.config.* data
         $vmx = $($(Get-Content $vmxTemp | Select-String -Pattern 'guestinfo.coreos.config.data' -NotMatch) -join "`n").Trim()
         $vmx = $(($vmx | Select-String -Pattern 'guestinfo.coreos.config.data.encoding' -NotMatch) -join "`n").Trim()
@@ -193,7 +205,7 @@ Function Write-CoreOSCloudConfig{
         # Inject new cloud-config data
         $vmx += "guestinfo.coreos.config.data = $EncodedText" + "`n"
         $vmx += "guestinfo.coreos.config.data.encoding = base64" + "`n"
-        
+    
         $GuestInfo.Keys | ForEach-Object{
             $vmx += "$($_) = $($GuestInfo[$_])" + "`n"
 
@@ -203,7 +215,7 @@ Function Write-CoreOSCloudConfig{
         $vmx | Out-File $vmxTemp -Encoding 'ASCII'
 
         # Replace vSphere Infrastructure VMX file with temporary one
-        Copy-DatastoreItem -Item $vmxTemp -Destination $vmxRemote
+        Copy-DatastoreItem -Force -Item $vmxTemp -Destination $vmxRemote
 
         # Power-On virtaul machine and watch for VMware Tools status
         $vm | Start-VM > $Null
@@ -221,7 +233,7 @@ Function Write-CoreOSCloudConfig{
     END {
         Write-Host -NoNewline -Object "${Name}: VMware Tools Status [" 
         Write-Host -NoNewline -ForegroundColor 'green' -Object $Status
-        Write-Host -Object "]" 
+        Write-Host -Object "]"
 
         Remove-PSDrive -Name $Datastore.Name > $Null
     }

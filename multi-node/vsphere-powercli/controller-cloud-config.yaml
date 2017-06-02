@@ -2,19 +2,27 @@
 ssh_authorized_keys:
   - "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDO6C9oQUMu4IpsOMbstuJgjVOu35DGedtAZ0IH1aluKCKWCiXHLdtCxbYfXyrbAh4BbkyIqPX3QitFyti251gkAYYEcp3bvVk/u0Dg8q1uxRxnNvH2+yTP2LWci20UfZ9SUo54BoGVnRnmvVYmS9D1tHJ7oTAXAbrPeNeHZVfr34fYKwibTTpEQ+rtxPxuj/xgjv7BDMMkMLRyMnPwzf9wB3+HT5dFb5v2zaaj1XjC6Qibsp4lZifnS7MjeEI+nxK6aw8dxazA3p0gdM/RZgH71bGgQ+AQchdIFnhhm2HGK5nWYvbRuWXWzjn6hgIvLRnH1RVD3NZX48aiSHqCNH3t dsi@zenoss.economat.local"
   - ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDCX8uF7dsmLGqmXSHbVMgywo0vhR5muKFTL277i//Ze9ed1rkQW6nYGm3Tjk4/2NWaqSqyRNFbi9c1X3vgArwL/dSKIbu+HhuW6BO9l3IM3sR3BxmoU8wZD2TySO82QD9bWpn0Y2zNkRxVGddvuF5VQVeVeA7J5oBRaEEI0HNNBY/66Go9tIOj77KKyzFk53uxeWVOYkNP5a7RQvJJOui5Po0EkbJG0rhAXKQ305c+0DBcU1rs5VOD4W9AjCZ/LVM3cU78JzIU25Vu1b1EVSQxSAu3TNB0XhsDTKFwRDXzU1RaIgUGZ/ycD8qZj8tUlRqJwl4Xyx1uo1pckqf/ReC3 fjudith@economat.local
+users:
+  - name: "k8s-vsphere"
+    passwd: "$6$rounds=4096$CTygOwZxVTX4af$5ejvcx4QqA3Aoul/5zboIzj18rf/zg8UXhGoW9lCtnhooRDbrlWQzr8P.vTcezOwSk.FEAOcJzoxEGzYgTAg10"
+    groups:
+      - "sudo"
+      - "docker"
 coreos:
   update:
     reboot-strategy: "off"
-
-  etcd2:
-    name: k8setcd003
-    initial-cluster: k8setcd001=http://192.168.251.51:2380,k8setcd002=http://192.168.251.52:2380,k8setcd003=http://192.168.251.53:2380
-    advertise-client-urls: http://$private_ipv4:2379
-    listen-client-urls: http://0.0.0.0:2379
-    initial-advertise-peer-urls: http://$private_ipv4:2380
-    listen-peer-urls: http://$private_ipv4:2380
-
   units:
-  - name: etcd2.service
-    command: start
-
+    - name: coreos-cloudinit-vsphere-mkdir.service
+      command: start
+      runtime: yes
+      content: |
+        [Service]
+        Type=oneshot
+        ExecStart=/bin/mkdir -p /var/lib/coreos-vsphere
+    - name: coreos-cloudinit-vsphere-user.path
+      command: start
+      runtime: yes
+      content: |
+        [Path]
+        PathExists=/var/lib/coreos-vsphere/vsphere-user-data
+        Unit=user-cloudinit@var-lib-coreos\x2dvsphere-vsphere\x2duser\x2ddata.service
