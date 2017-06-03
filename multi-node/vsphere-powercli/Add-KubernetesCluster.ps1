@@ -62,10 +62,6 @@ BEGIN{
     Import-Module -Name "${pwd}\Modules\K8s-vSphere"
     Import-module -Name "${pwd}\Modules\Posh-SSH"
 
-    # Create SSH Credential Object
-    $SecureHostPassword = ConvertTo-SecureString "${SSHPassword}" -AsPlainText -Force
-    $SSHCredential = New-Object System.Management.Automation.PSCredential ("${SSHUser}", $SecureHostPassword)
-
     # Load Machine configuration from config
     $Config = ([System.IO.FileInfo]"${pwd}\config.rb").FullName
     If (Test-Path $Config)
@@ -78,6 +74,10 @@ BEGIN{
         Write-Warning -Message 'Workers should have at least 1024 MB of Memory'
     }
 
+    # Create SSH Credential Object
+    $SecureHostPassword = ConvertTo-SecureString "${SSHPassword}" -AsPlainText -Force
+    $SSHCredential = New-Object System.Management.Automation.PSCredential ("${SSHUser}", $SecureHostPassword)
+
     $EtcdCloudConfigFile = ([System.IO.FileInfo]"${pwd}\etcd-cloud-config.yaml").FullName
     $ControllerCloudConfigFile = ([System.IO.FileInfo]"${pwd}\controller-cloud-config.yaml").FullName
     $WorkerCloudConfigFile = ([System.IO.FileInfo]"${pwd}\worker-cloud-config.yaml").FullName
@@ -85,7 +85,6 @@ BEGIN{
     $ControllerCloudConfigPath = ([System.IO.FileInfo]"${pwd}\..\generic\controller-install.sh").FullName
     $WorkerCloudConfigPath = ([System.IO.FileInfo]"${pwd}\..\generic\worker-install.sh").FullName
 
-    
     # Building array of Etcd IP addresses as per given etcd count
     $EtcdIPs = Get-K8sEtcdIP -Subnet $EtcdSubnet -StartFrom $EtcdStartFrom -Count $EtcdCount
     
@@ -116,19 +115,6 @@ BEGIN{
     Write-Host -NoNewline -Object "Controller IP Adresses ["
     Write-Host -NoNewline -ForegroundColor 'green' -Object "${ControllerIPs}"
     Write-Host -Object "]"
-
-
-    Function Send-SSHMachineSSL(
-        [string]$Machine, [string]$CertificateBaseName, [String]$CommonName, [String[]]$IpAddresses,[String]$Computername,[int]$SSHSession){
-        $ZipFile = "${pwd}/${CommonName}"
-        $IPString = @()
-        For($i = 0 ; $i -lt $IpAddresses.Length; $i++){$IPString += "IP.$($i +1) = $($IpAddresses[$i])"}
-        
-        Write-K8sCertificate -OutputPath "${pwd}\ssl" -Name "${CertificateBaseName}" -CommonName "${CommonName}" -SubjectAlternativeName $IpString
-
-        Set-ScpFile  -Force -LocalFile "${pwd}\ssl\${CommonName}.zip" -RemotePath '/tmp/' -ComputerName $Computername -Credential $SSHCredential
-        Invoke-SSHCommand -SessionId $SSHSession -Command "sudo mkdir -p /etc/kubernetes/ssl && sudo unzip -o -e /tmp/${CommonName}.zip -d /etc/kubernetes/ssl"
-    }
 }  
 PROCESS{
     

@@ -171,6 +171,49 @@ Function Write-K8sCertificate{
     }
 }
 
+Function Send-SSHMachineSSL{
+    PARAM(
+        [parameter(mandatory=$true)]
+        [string]
+        $Machine,
+        
+        [parameter(mandatory=$true)]
+        [string]
+        $CertificateBaseName, 
+        
+        [parameter(mandatory=$true)]
+        [String]
+        $CommonName, 
+        
+        [parameter(mandatory=$true)]
+        [String[]]
+        $IpAddresses,
+        
+        [parameter(mandatory=$true)]
+        [String]
+        $Computername,
+    
+        [parameter(mandatory=$false)]
+        [PSCredential]
+        $Credential,
+
+        [parameter(mandatory=$true)]
+        [int]
+        $SSHSession
+    )
+    BEGIN{
+        $ZipFile = "${pwd}/${CommonName}.zip"
+        $IPString = @()
+        For($i = 0 ; $i -lt $IpAddresses.Length; $i++){$IPString += "IP.$($i +1) = $($IpAddresses[$i])"}
+    }
+    PROCESS{
+        Write-K8sCertificate -OutputPath "${pwd}\ssl" -Name "${CertificateBaseName}" -CommonName "${CommonName}" -SubjectAlternativeName $IpString
+
+        Set-ScpFile  -Force -LocalFile $ZipFile -RemotePath '/tmp/' -ComputerName $Computername -Credential $Credential
+        Invoke-SSHCommand -SessionId $SSHSession -Command "sudo mkdir -p /etc/kubernetes/ssl && sudo unzip -o -e /tmp/${CommonName}.zip -d /etc/kubernetes/ssl"
+    }
+}
+
 Function Update-Coreos{
     PARAM(
         [parameter(mandatory=$false,position=0)]
@@ -179,7 +222,7 @@ Function Update-Coreos{
 
         [parameter(mandatory=$false,position=1)]
         [string]
-        $Destination = "$(pwd)\.ova\coreos_production_vmware_ova.ova"
+        $Destination = "${pwd}\.ova\coreos_production_vmware_ova.ova"
     )
     BEGIN{
         Import-Module BitsTransfer
@@ -745,6 +788,10 @@ Function New-K8sControllerCluster{
         [parameter(mandatory=$false)]
         [string]
         $CloudConfigFile = "${pwd}\Controller-cloud-config.yaml",
+        
+        [parameter(mandatory=$false)]
+        [PSCredential]
+        $Credential,
 
         [parameter(mandatory=$false)]
         [string]
@@ -754,7 +801,6 @@ Function New-K8sControllerCluster{
         Write-Verbose -Message "Provisionning `"${Count}`" controller hosts"
 
         $IpAddresses = New-K8sIpAddress -Subnet $Subnet -StartFrom $StartFrom -Count $Count
-        $EtcdCluster = Get-K8sEtcdInitialCluster -NamePrefix $NamePrefix -IpAddress $IpAddresses
     }
     PROCESS{
         For($i = 0; $i -lt $Count; $i++){
@@ -806,7 +852,7 @@ Function New-K8sControllerCluster{
 
             # Generate and copy SSL asset
             Send-SSHMachineSSL -Machine $Name -CertificateBaseName 'apiserver' -CommonName "kube-apiserver-${IP}" -IpAddresses $IpAddresses `
-            -Computername $IP  -SSHSession $SSHSessionID
+            -Computername $IP -Credential $SSHCredential  -SSHSession $SSHSessionID
                     
             # Copy kubernetes worker configuration asset
             Set-ScpFile -Force -LocalFile "${InstallScript}" -RemotePath '/tmp/' -ComputerName $IP -Credential $SSHCredential
@@ -894,6 +940,10 @@ Function New-K8sWorkerCluster{
         $CloudConfigFile = "${pwd}\worker-cloud-config.yaml",
 
         [parameter(mandatory=$false)]
+        [PSCredential]
+        $SSHCredential,
+
+        [parameter(mandatory=$false)]
         [string]
         $InstallScript,
 
@@ -903,9 +953,6 @@ Function New-K8sWorkerCluster{
     )
     BEGIN{
         Write-Verbose -Message "Provisionning `"${Count}`" worker hosts"
-
-        $IpAddresses = New-K8sIpAddress -Subnet $Subnet -StartFrom $StartFrom -Count $Count
-        $EtcdCluster = Get-K8sEtcdInitialCluster -NamePrefix $NamePrefix -IpAddress $IpAddresses
     }
     PROCESS{
         For($i = 0; $i -lt $Count; $i++){
@@ -957,7 +1004,7 @@ Function New-K8sWorkerCluster{
             $SSHSessionID = $(New-SSHSession -ComputerName $IP -Credential $SSHCredential -Force).SessionID
 
             Send-SSHMachineSSL -Machine $Name -CertificateBaseName 'worker' -CommonName "kube-worker-${IP}" -IpAddresses $IP `
-            -Computername $IP -SSHSession $SSHSessionID
+            -Computername $IP -Credental $SSHCredential -SSHSession $SSHSessionID
 
             # Copy kubernetes worker configuration asset
             Set-ScpFile -Force -LocalFile "${CloudConfigPath}" -RemotePath '/tmp/' -ComputerName $IP -Credential $SSHCredential
