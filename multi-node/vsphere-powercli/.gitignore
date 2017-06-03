@@ -1,3 +1,4 @@
 .ova
 ssl/
-conf/*
+conf/
+kubeconfig
