@@ -455,7 +455,7 @@ Function Write-CoreOSCloudConfig{
 }
 
 
-Function New-K8sIpAdress{
+Function New-K8sIpAddress{
 <#
 .SYNOPSIS
 Compute an IPv4 address for a host.
