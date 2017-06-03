@@ -502,7 +502,7 @@ General notes
 
 Function Get-K8sEtcdIP{
     PARAM(
-        [parameter(manadotry=$false)]
+        [parameter(mandatory=$false)]
         [string]
         $Subnet,
         
@@ -592,7 +592,7 @@ Function Get-K8sEtcdEndpoint{
 
 Function Get-K8sControllerIP{
     PARAM(
-        [parameter(manadotry=$false)]
+        [parameter(mandatory=$false)]
         [string]
         $Subnet,
         
@@ -604,7 +604,7 @@ Function Get-K8sControllerIP{
         [int]
         $Count = '1',
         
-        [parameter(manadotry=$false)]
+        [parameter(mandatory=$false)]
         [string]
         $ControllerCluser = '10.3.0.1'
     )
@@ -628,19 +628,19 @@ Function Get-K8sControllerIP{
 
 Function New-K8sEtcdCluster{
     PARAM(
-        [parameter(manadotry=$false)]
+        [parameter(mandatory=$false)]
         [string]
         $Subnet,
 
-        [parameter(manadotry=$false)]
+        [parameter(mandatory=$false)]
         [int]
         $CIDR,
 
-        [parameter(manadotry=$false)]
+        [parameter(mandatory=$false)]
         [string]
         $Gateway,
         
-        [parameter(manadotry=$false)]
+        [parameter(mandatory=$false)]
         [string[]]
         $DNS,
 
@@ -737,19 +737,19 @@ Function New-K8sEtcdCluster{
 
 Function New-K8sControllerCluster{
     PARAM(
-        [parameter(manadotry=$false)]
+        [parameter(mandatory=$false)]
         [string]
         $Subnet,
 
-        [parameter(manadotry=$false)]
+        [parameter(mandatory=$false)]
         [int]
         $CIDR,
 
-        [parameter(manadotry=$false)]
+        [parameter(mandatory=$false)]
         [string]
         $Gateway,
         
-        [parameter(manadotry=$false)]
+        [parameter(mandatory=$false)]
         [string[]]
         $DNS,
 
@@ -887,19 +887,19 @@ Function New-K8sControllerCluster{
 
 Function New-K8sWorkerCluster{
     PARAM(
-        [parameter(manadotry=$false)]
+        [parameter(mandatory=$false)]
         [string]
         $Subnet,
 
-        [parameter(manadotry=$false)]
+        [parameter(mandatory=$false)]
         [int]
         $CIDR,
 
-        [parameter(manadotry=$false)]
+        [parameter(mandatory=$false)]
         [string]
         $Gateway,
         
-        [parameter(manadotry=$false)]
+        [parameter(mandatory=$false)]
         [string[]]
         $DNS,
 
