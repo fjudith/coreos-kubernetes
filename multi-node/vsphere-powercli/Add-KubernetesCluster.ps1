@@ -43,30 +43,30 @@ PARAM(
     [parameter(mandatory=$false)][String]$SSHUser = 'k8s-vsphere',
     [parameter(mandatory=$false)][String]$SSHPassword = 'K8S-vsph3r3',
 
-    # DNS Records
+    # CoreOS host dns records
     [parameter(mandatory=$false)][string[]]$DnsServer = @(
         '192.168.1.1';
         '192.168.1.2'
     ),
 
-    [parameter(mandatory=$false)][String]$ControllerClusterIP = "10.3.0.1"
+    # Controller cluster IP
+    [parameter(mandatory=$false)][String]$ControllerClusterIP = '10.3.0.1'
 )
 BEGIN{
     Set-StrictMode -Version 5
 
-    #$ErrorActionPreference = 'stop'
+    $ErrorActionPreference = 'stop'
 
     # Import Powershell Module
     Import-Module -Name 'VMware.VimAutomation.Core'
-    Connect-Viserver 'vcenter.economat.local' -User 'fjudith@economat.local' -Password 'Dj43l1ss.03'
     Import-Module -Force -Name "${pwd}\Modules\K8s-vSphere"
     Import-module -Force -Name "${pwd}\Modules\Posh-SSH"
 
     # Load Machine configuration from config
-    $Config = ([System.IO.FileInfo]"${pwd}\config.rb").FullName
+    $Config = ([System.IO.FileInfo]"${pwd}\config.ps1").FullName
     If (Test-Path $Config)
     {
-        Get-Content $Config | Invoke Expression
+        Invoke-Expression $(Get-Content $Config)
     }
 
     If ($WorkerVMMemory -le 1024)
@@ -139,14 +139,16 @@ PROCESS{
 
     # Etcd
     ##################################################
-    if($VMHost){
+    if($VMHost)
+    {
         New-K8sEtcdCluster -VMhost $VMHost `
         -Subnet $EtcdSubnet -CIDR $EtcdCIDR -Gateway $EtcdGateway -DNS $DnsServer `
         -StartFrom $EtcdStartFrom -Count $EtcdCount -NamePrefix $EtcdNamePrefix `
         -DataStore $Datastore -PortGroup $PortGroup -DiskstorageFormat $DiskStorageFormat `
         -CloudConfigFile $EtcdCloudConfigFile
     }
-    ElseIf($Cluster){
+    ElseIf($Cluster)
+    {
         New-K8sEtcdCluster -Cluster $Cluster `
         -Subnet $EtcdSubnet -CIDR $EtcdCIDR -Gateway $EtcdGateway -DNS $DnsServer `
         -StartFrom $EtcdStartFrom -Count $EtcdCount -NamePrefix $EtcdNamePrefix `
@@ -156,7 +158,8 @@ PROCESS{
 
     # Controller
     ##################################################
-    if($VMHost){
+    if($VMHost)
+    {
         New-K8sControllerCluster -VMhost $VMHost `
         -Subnet $ControllerSubnet -CIDR $ControllerCIDR -Gateway $ControllerGateway -DNS $DnsServer `
         -StartFrom $ControllerStartFrom -Count $ControllerCount -NamePrefix $ControllerNamePrefix `
@@ -164,7 +167,8 @@ PROCESS{
         -CloudConfigFile $ControllerCloudConfigFile -InstallScript $ControllerCloudConfigPath `
         -SSHCredential $SSHCredential
     }
-    ElseIf($Cluster){
+    ElseIf($Cluster)
+    {
         New-K8sControllerCluster -Cluster $Cluster `
         -Subnet $ControllerSubnet -CIDR $ControllerCIDR -Gateway $ControllerGateway -DNS $DnsServer `
         -StartFrom $ControllerStartFrom -Count $ControllerCount -NamePrefix $ControllerNamePrefix `
@@ -175,7 +179,8 @@ PROCESS{
 
     # Worker
     ##################################################
-    if($VMHost){
+    if($VMHost)
+    {
         New-K8sWorkerCluster -VMhost $VMHost `
         -Subnet $WorkerSubnet -CIDR $WorkerCIDR -Gateway $WorkerGateway -DNS $DnsServer `
         -StartFrom $WorkerStartFrom -Count $WorkerCount -NamePrefix $WorkerNamePrefix `
@@ -184,7 +189,8 @@ PROCESS{
         -EtcdEndpoints $EtcdEndpoints `
         -SSHCredential $SSHCredential
     }
-    ElseIf($Cluster){
+    ElseIf($Cluster)
+    {
         New-K8sWorkerCluster -Cluster $Cluster `
         -Subnet $WorkerSubnet -CIDR $WorkerCIDR -Gateway $WorkerGateway -DNS $DnsServer `
         -StartFrom $WorkerStartFrom -Count $WorkerCount -NamePrefix $WorkerNamePrefix `

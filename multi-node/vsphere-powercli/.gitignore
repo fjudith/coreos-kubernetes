@@ -2,3 +2,4 @@
 ssl/
 conf/
 kubeconfig
+config.ps1

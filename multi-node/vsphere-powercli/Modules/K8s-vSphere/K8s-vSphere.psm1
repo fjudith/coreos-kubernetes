@@ -1,10 +1,12 @@
-Function Write-K8sCACertificate{
+Function Write-K8sCACertificate
+{
     PARAM(
         [parameter(mandatory=$True)]
         [String]
         $OutputPath
     )
-    BEGIN{
+    BEGIN
+    {
         $ErrorActionPreference = 'stop'
 
         $OpenSSLBinary = $(Get-Command -Type 'Application' -Name 'openssl').Path
@@ -14,12 +16,14 @@ Function Write-K8sCACertificate{
         $PEMFile = "${OutputPath}\ca.pem"
         $KeyFile    = "${OutputPath}\ca-key.pem"
         
-        if(Test-Path -Path $PEMFile){
+        if(Test-Path -Path $PEMFile)
+        {
             Write-Verbose -Message "CA Certificate already exists. Nothing to do."
             Break
         }   
     }
-    PROCESS{
+    PROCESS
+    {
         # Generate private key
         Write-Verbose -Message "Generating CA certificate private key path:`"$KeyFile`""
         $Log = "${KeyFile}.log"
@@ -47,13 +51,15 @@ Function Write-K8sCACertificate{
             "-subj `"/CN=kube-ca`""
         ) -NoNewWindow -RedirectStandardOutput $Log
     }
-    END{
+    END
+    {
         Write-Output -InputObject $(Get-ChildItem -Path $OutputPath)
     }
 }
 
 
-Function Write-K8sCertificate{
+Function Write-K8sCertificate
+{
     PARAM(
         [parameter(mandatory=$True)]
         [String]
@@ -71,7 +77,8 @@ Function Write-K8sCertificate{
         [String[]]
         $SubjectAlternativeName
     )
-    BEGIN{
+    BEGIN
+    {
         $ErrorActionPreference = 'stop'
 
         $OpenSSLBinary = $(Get-Command -Type 'Application' -Name 'openssl').Path
@@ -80,7 +87,8 @@ Function Write-K8sCertificate{
 
         $OutputFile = "${OutputPath}\$CommonName.zip"
 
-        if(Test-Path -Path $OutputFile){
+        if(Test-Path -Path $OutputFile)
+        {
             Write-Verbose -Message "Certificate package for `"$CommonName`" already exists. Nothing to do."
             Break
         }
@@ -111,7 +119,8 @@ Function Write-K8sCertificate{
 
         $Contents="${CAFile} ${KeyFile} ${PEMFile}"
     }
-    PROCESS{
+    PROCESS
+    {
         
         # Add SANs to openssl config
         Write-Verbose -Message "Adding Suject Alternative Names:`"$SubjectAlternativeName`" to OpenSSL configuration file path:`"$ConfigFile`""
@@ -171,7 +180,8 @@ Function Write-K8sCertificate{
     }
 }
 
-Function Send-SSHMachineSSL{
+Function Send-SSHMachineSSL
+{
     PARAM(
         [parameter(mandatory=$true)]
         [string]
@@ -201,12 +211,14 @@ Function Send-SSHMachineSSL{
         [int]
         $SSHSession
     )
-    BEGIN{
+    BEGIN
+    {
         $ZipFile = "${pwd}\ssl\${CommonName}.zip"
         $IPString = @()
         For($i = 0 ; $i -lt $IpAddresses.Length; $i++){$IPString += "IP.$($i +1) = $($IpAddresses[$i])"}
     }
-    PROCESS{
+    PROCESS
+    {
         Write-K8sCertificate -OutputPath "${pwd}\ssl" -Name "${CertificateBaseName}" -CommonName "${CommonName}" -SubjectAlternativeName $IpString
 
         Set-ScpFile  -Force -LocalFile $ZipFile -RemotePath '/tmp/' -ComputerName $Computername -Credential $Credential
@@ -214,7 +226,8 @@ Function Send-SSHMachineSSL{
     }
 }
 
-Function Update-Coreos{
+Function Update-Coreos
+{
     PARAM(
         [parameter(mandatory=$false,position=0)]
         [string]
@@ -224,7 +237,8 @@ Function Update-Coreos{
         [string]
         $Destination = "${pwd}\.ova\coreos_production_vmware_ova.ova"
     )
-    BEGIN{
+    BEGIN
+    {
         Import-Module BitsTransfer
 
         # Download URL
@@ -233,18 +247,22 @@ Function Update-Coreos{
 
         # Test Internet Access
         Write-Host -NoNewline -Object "Internet access status ["
-        Try{
+        Try
+        {
             Invoke-WebRequest -URI "https://${UpdateChannel}.release.core-os.net" > $Null
             Write-Host -NoNewline -ForegroundColor 'green' -Object 'Connected'
         }
-        Catch{
+        Catch
+        {
             Write-Host -NoNewline -ForegroundColor 'red' -Object 'Not Connected'
         }
         Write-Host -Object "]"
     }
-    PROCESS{
+    PROCESS
+    {
         # Test if OVA already downloaded
-        If(Test-Path $Destination){
+        If(Test-Path $Destination)
+        {
             # If Already exists then
             # Compute MD5 Hash of the current file to determine if udpate is required
             $Md5 = New-Object -TypeName System.Security.Cryptography.MD5CryptoServiceProvider
@@ -254,11 +272,14 @@ Function Update-Coreos{
             $Compare = Invoke-WebRequest -Method 'GET' -URI $Digests
 
             Write-Host -NoNewline -Object "CoreOS OVA `"$UpdateChannel`" status ["
-            If($Compare.RawContent -Match $Hash){
+            
+            If($Compare.RawContent -Match $Hash)
+            {
                 Write-Host -NoNewLine -ForegroundColor 'green' -Object "Up-To-Date"
                 Write-Host -Object "]"
             }
-            Else{
+            Else
+            {
                 Write-Host -NoNewLine -ForegroundColor 'yellow' -Object "Updating"
                 Write-Host -Object "]"
 
@@ -268,7 +289,8 @@ Function Update-Coreos{
                 Start-BitsTransfer -Source $URI -Destination $Destination
             }        
         }
-        Else{
+        Else
+        {
             # If not exists then
             # Create desitnation directory and download file
             Write-Host -NoNewLine -Object "CoreOS OVA `"$UpdateChannel`" status ["
@@ -278,14 +300,13 @@ Function Update-Coreos{
             New-Item -Force -ItemType 'Directory' -Path  $([System.IO.FileInfo]$Destination).DirectoryName > $Null
             Invoke-WebRequest -Uri $URI -OutFile $Destination
         }
-
     }
-
 }
 
 
 
-Function Import-CoreOS{
+Function Import-CoreOS
+{
     PARAM(
         [parameter(mandatory=$false,position=1)]
         [string]
@@ -316,20 +337,25 @@ Function Import-CoreOS{
         $OVAPath = "${pwd}\.ova\coreos_production_vmware_ova.ova"
 
     )
-    BEGIN{
+    BEGIN
+    {
         Import-Module -Name 'VMware.VimAutomation.Core'
 
-        If(-Not $(Test-Path -Path $OVAPath)){
+        If(-Not $(Test-Path -Path $OVAPath))
+        {
             Update-CoreOS
         }
     }
-    PROCESS{
+    PROCESS
+    {
         # Import OVA in VMHost
-        If($VMHost){
+        If($VMHost)
+        {
             $VMHostObject = Get-VMHost -Name $VMHost
             
         }
-        Elseif($Cluster){
+        Elseif($Cluster)
+        {
             $ClusterHosts = Get-cluster -Name "${Cluster}" | Get-VMHost
             $Rand = Get-Random -Minimum 0 -Maximum ($ClusterHosts.Length -1)
             
@@ -344,7 +370,8 @@ Function Import-CoreOS{
         $VMHostObject | Import-vApp -Source $OVAPath -Name $Name -DataStore $Datastore -DiskStorageFormat $DiskStorageFormat > $Null
 
         # Distables vApp/Ovfenv if connected to a vCenter instance as CoreOS OVA computes "ovfenv" first.
-        If($(Get-VMHost).Length -gt 1){
+        If($(Get-VMHost).Length -gt 1)
+        {
             # Connecté à un vCenter
             # Désactivation de l'option vApp
             $disablespec = New-Object VMware.Vim.VirtualMachineConfigSpec
@@ -361,7 +388,8 @@ Function Import-CoreOS{
     }
 }
 
-Function Write-CoreOSCloudConfig{
+Function Write-CoreOSCloudConfig
+{
     PARAM(
         [parameter(mandatory=$false,position=0)]
         [string]
@@ -383,7 +411,8 @@ Function Write-CoreOSCloudConfig{
         [string]
         $VMHost
     )
-    BEGIN{
+    BEGIN
+    {
         
         # Temporary VMX file to inject cloud-config data
         $vmxTemp = "$($([System.IO.FileInfo]$CloudConfigPath).DirectoryName)\$($Name).vmx"
@@ -398,7 +427,8 @@ Function Write-CoreOSCloudConfig{
         ElseIf($VMHost) {$vm = Get-VMHost -Name $VMHost | Get-VM -Name $Name}
         Else            {$vm = Get-VM -Name $Name}
     }
-    PROCESS{
+    PROCESS
+    {
 
         # Power-Off the virtualmachine if powered-on.
         If ($vm.PowerState -eq "PoweredOn"){ $vm | Stop-VM -Confirm:$False }
@@ -407,7 +437,10 @@ Function Write-CoreOSCloudConfig{
         $Datastore = $vm | Get-Datastore
         $vmxRemote = "$($Datastore.name):\$($Name)\$($Name).vmx"
 
-        If (Get-PSDrive | Where-Object { $_.Name -eq $Datastore.Name}) { Remove-PSDrive -Name $Datastore.Name }
+        If (Get-PSDrive | Where-Object { $_.Name -eq $Datastore.Name})
+        {
+            Remove-PSDrive -Name $Datastore.Name
+        }
         
         New-PSDrive -Location $Datastore -Name $Datastore.Name -PSProvider VimDatastore -Root "\" > $Null
         Copy-DatastoreItem -Item $vmxRemote -Destination $vmxTemp > $Null
@@ -421,7 +454,8 @@ Function Write-CoreOSCloudConfig{
         $vmx += "guestinfo.coreos.config.data = $EncodedText" + "`n"
         $vmx += "guestinfo.coreos.config.data.encoding = base64" + "`n"
     
-        $GuestInfo.Keys | ForEach-Object{
+        $GuestInfo.Keys | ForEach-Object
+        {
             $vmx += "$($_) = $($GuestInfo[$_])" + "`n"
 
         }
@@ -435,7 +469,9 @@ Function Write-CoreOSCloudConfig{
         # Power-On virtaul machine and watch for VMware Tools status
         $vm | Start-VM > $Null
         $status = "toolsNotRunning"
-        while ($status -eq "toolsNotRunning"){
+
+        while ($status -eq "toolsNotRunning")
+        {
             $status = (Get-VM -name $Name | Get-View).Guest.ToolsStatus
             
             Write-Host -NoNewline -Object "${Name}: VMware Tools Status [" 
@@ -445,7 +481,8 @@ Function Write-CoreOSCloudConfig{
             Start-Sleep -Seconds 10
         }
     }
-    END {
+    END
+    {
         Write-Host -NoNewline -Object "${Name}: VMware Tools Status [" 
         Write-Host -NoNewline -ForegroundColor 'green' -Object $Status
         Write-Host -Object "]"
@@ -455,7 +492,8 @@ Function Write-CoreOSCloudConfig{
 }
 
 
-Function New-K8sIpAddress{
+Function New-K8sIpAddress
+{
 <#
 .SYNOPSIS
 Compute an IPv4 address for a host.
@@ -491,7 +529,8 @@ General notes
         [Int]
         $Count = 1
     )
-    PROCESS{
+    PROCESS
+    {
         # Parse Subnet address to extract the first 3 octets
         $Subnet -Match '^(?<BeginIP>\d{1,3}\.\d{1,3}\.\d{1,3})\.\d{1,3}$' > $Null
 
@@ -500,7 +539,8 @@ General notes
 }
 
 
-Function Get-K8sEtcdIP{
+Function Get-K8sEtcdIP
+{
     PARAM(
         [parameter(mandatory=$false)]
         [string]
@@ -514,15 +554,18 @@ Function Get-K8sEtcdIP{
         [int]
         $Count = 1
     )
-    BEGIN{
+    BEGIN
+    {
         $IpArray = @()
     }
-    PROCESS{
+    PROCESS
+    {
         For($i = 1 ; $i -le $Count; $i++){
             $IpArray += New-K8sIpAddress -Subnet $Subnet -StartFrom $StartFrom -Count $i
         }
     }
-    End{
+    END
+    {
         Write-Verbose "etcd IP:`"$ClusterArray`""
 
         # Return the array containing the etcd ip address list
@@ -530,7 +573,8 @@ Function Get-K8sEtcdIP{
     }
 }
 
-Function Get-K8sEtcdInitialCluster{
+Function Get-K8sEtcdInitialCluster
+{
     PARAM(
         [parameter(mandatory=$false)]
         [string]
@@ -540,15 +584,19 @@ Function Get-K8sEtcdInitialCluster{
         [string[]]
         $IpAddress
     )
-    BEGIN{
+    BEGIN
+    {
         $ClusterArray = @()
     }
-    PROCESS{
-        For($i = 0 ; $i -le $IpAdress.Length; $i++){
+    PROCESS
+    {
+        For($i = 0 ; $i -le $IpAdress.Length; $i++)
+        {
             $ClusterArray += "${NamePrefix}$("{0:D3}" -f $($i +1))=http://$($EtcdIPs[$i]):2380"
         }
     }
-    End{
+    END
+    {
         # Flatten the array with comma separators
         $ClusterArray = $ClusterArray -Join ','
         Write-Verbose "Initial Etcd Cluster:`"$ClusterArray`""
@@ -558,7 +606,8 @@ Function Get-K8sEtcdInitialCluster{
     }
 }
 
-Function Get-K8sEtcdEndpoint{
+Function Get-K8sEtcdEndpoint
+{
     PARAM(
         [parameter(mandatory=$false)]
         [string[]]
@@ -572,15 +621,19 @@ Function Get-K8sEtcdEndpoint{
         [int]
         $port = 2379
     )
-    BEGIN{
+    BEGIN
+    {
         $ClusterArray = @()
     }
-    PROCESS{
-        Foreach($Item in $IpAddress){
+    PROCESS
+    {
+        Foreach($Item in $IpAddress)
+        {
             $ClusterArray += "${Protocol}://${Item}:${Port}"
         }
     }
-    End{
+    END
+    {
         # Flatten the array with comma separators
         $ClusterArray = $ClusterArray -Join ','
         Write-Verbose "Etcd endpoints:`"$ClusterArray`""
@@ -590,7 +643,8 @@ Function Get-K8sEtcdEndpoint{
     }
 }
 
-Function Get-K8sControllerIP{
+Function Get-K8sControllerIP
+{
     PARAM(
         [parameter(mandatory=$false)]
         [string]
@@ -608,15 +662,19 @@ Function Get-K8sControllerIP{
         [string]
         $ControllerCluster = '10.3.0.1'
     )
-    BEGIN{
+    BEGIN
+    {
         $IpArray = @()
     }
-    PROCESS{
-        For($i = 1 ; $i -le $Count; $i++){
+    PROCESS
+    {
+        For($i = 1 ; $i -le $Count; $i++)
+        {
             $IpArray += New-K8sIpAddress -Subnet $Subnet -StartFrom $StartFrom -Count $i
         }
     }
-    End{
+    END
+    {
         $IpArray += $ControllerCluser
         Write-Verbose "Conroller IP:`"$ClusterArray`""
 
@@ -626,7 +684,8 @@ Function Get-K8sControllerIP{
 }
 
 
-Function New-K8sEtcdCluster{
+Function New-K8sEtcdCluster
+{
     PARAM(
         [parameter(mandatory=$false)]
         [string]
@@ -680,7 +739,8 @@ Function New-K8sEtcdCluster{
         [string]
         $CloudConfigFile = "${pwd}\etcd-cloud-config.yaml"
     )
-    BEGIN{
+    BEGIN
+    {
         $IpAddresses = New-K8sIpAddress -Subnet $Subnet -StartFrom $StartFrom -Count $Count
         $EtcdCluster = Get-K8sEtcdInitialCluster -NamePrefix $NamePrefix -IpAddress $IpAddresses
 
@@ -688,13 +748,15 @@ Function New-K8sEtcdCluster{
         Write-Host -NoNewline -ForegroundColor 'green' -Object "${Count}"
         Write-Host -Object "]"
     }
-    PROCESS{
-        For($e = 0; $e -lt $Count ; $e++){
+    PROCESS
+    {
+        For($e = 0; $e -lt $Count ; $e++)
+        {
             $Name = "${NamePrefix}$("{0:D3}" -f $($e +1))"
             $IP = New-K8sIpAddress -Subnet $Subnet -StartFrom $StartFrom -Count $($e +1)
 
             Write-Host -NoNewline -Object "Deploying etcd host ["
-            Write-Host -NoNewline -ForegroundColor 'green' -Object $e
+            Write-Host -NoNewline -ForegroundColor 'cyan' -Object ($e +1)
             Write-Host -Object "]"
             
             $ConfigPath = "${pwd}\conf\etcd\$Name\openstack\latest\user-data"
@@ -717,23 +779,28 @@ Function New-K8sEtcdCluster{
             }
 
             # Add DNS records to GuestInfo
-            For( $d = 0; $d -le $DNS.Length -1 ; $d++){
+            For( $d = 0; $d -le $DNS.Length -1 ; $d++)
+            {
                 $GuestInfo += @{"guestinfo.dns.server.$($d +1)" = $DNS[$d]}
             }
 
             # Provision, Configure and Start VM
-            If($VMHost -and $Cluster){
+            If($VMHost -and $Cluster)
+            {
                 Throw "Processing VMhost and Cluster is not supported"
             }
-            ElseIf($VMHost){
+            ElseIf($VMHost)
+            {
                 Import-CoreOS -Name "${Name}" -DataStore "${DataStore}" -VMHost "${VMHost}" -PortGroup "${PortGroup}" -DiskStorageFormat "${DiskstorageFormat}"
                 Write-CoreOSCloudConfig -Name "${Name}" -GuestInfo $GuestInfo -CloudConfigPath "${ConfigPath}" -VMHost "${VMHost}"
             }
-            ElseIf($Cluster){
+            ElseIf($Cluster)
+            {
                 Import-CoreOS -Name "${Name}" -DataStore "${DataStore}" -Cluster "${Cluster}" -PortGroup "${PortGroup}" -DiskStorageFormat "${DiskstorageFormat}"
                 Write-CoreOSCloudConfig -Name "${Name}" -GuestInfo $GuestInfo -CloudConfigPath "${ConfigPath}" -Cluster "${Cluster}"               
             }
-            Else{
+            Else
+            {
                 Throw "Missing vSphere hosting agurment:`"-VMHost`" or `"-Cluster`""
             }
         }
@@ -742,7 +809,8 @@ Function New-K8sEtcdCluster{
 }
 
 
-Function New-K8sControllerCluster{
+Function New-K8sControllerCluster
+{
     PARAM(
         [parameter(mandatory=$false)]
         [string]
@@ -804,17 +872,24 @@ Function New-K8sControllerCluster{
         [string]
         $InstallScript
     )
-    BEGIN{
+    BEGIN
+    {
         $IpAddresses = New-K8sIpAddress -Subnet $Subnet -StartFrom $StartFrom -Count $Count
         
         Write-Host -NoNewline -Object "Deploying controller count ["
         Write-Host -NoNewline -ForegroundColor 'green' -Object "${Count}"
         Write-Host -Object "]"
     }
-    PROCESS{
-        For($c = 0; $c -lt $Count ; $c++){
+    PROCESS
+    {
+        For($c = 0; $c -lt $Count ; $c++)
+        {
             $Name = "${NamePrefix}$("{0:D3}" -f $($c +1))"
             $IP = New-K8sIpAddress -Subnet $Subnet -StartFrom $StartFrom -Count $($c +1)
+
+            Write-Host -NoNewline -Object "Deploying etcd host ["
+            Write-Host -NoNewline -ForegroundColor 'cyan' -Object ($c +1)
+            Write-Host -Object "]"
 
             # Cloud Config
             $ConfigPath = "${pwd}\conf\controller\$Name\openstack\latest\user-data"
@@ -834,23 +909,28 @@ Function New-K8sControllerCluster{
             }
             
             # Add DNS records to GuestInfo
-            For( $d = 0; $d -le $DNS.Length -1 ; $d++){
+            For( $d = 0; $d -le $DNS.Length -1 ; $d++)
+            {
                 $GuestInfo += @{"guestinfo.dns.server.$($d +1)" = $DNS[$d]}
             }
 
             # Provision, Configure and Start VM
-            If($VMHost -and $Cluster){
+            If($VMHost -and $Cluster)
+            {
                 Throw "Processing VMhost and Cluster is not supported"
             }
-            ElseIf($VMHost){
+            ElseIf($VMHost)
+            {
                 Import-CoreOS -Name "${Name}" -DataStore "${DataStore}" -VMHost "${VMHost}" -PortGroup "${PortGroup}" -DiskStorageFormat "${DiskstorageFormat}"
                 Write-CoreOSCloudConfig -Name "${Name}" -GuestInfo $GuestInfo -CloudConfigPath "${ConfigPath}" -VMHost "${VMHost}"
             }
-            ElseIf($Cluster){
+            ElseIf($Cluster)
+            {
                 Import-CoreOS -Name "${Name}" -DataStore "${DataStore}" -Cluster "${Cluster}" -PortGroup "${PortGroup}" -DiskStorageFormat "${DiskstorageFormat}"
                 Write-CoreOSCloudConfig -Name "${Name}" -GuestInfo $GuestInfo -CloudConfigPath "${ConfigPath}" -Cluster "${Cluster}"               
             }
-            Else{
+            Else
+            {
                 Throw "Missing vSphere hosting agurment:`"-VMHost`" or `"-Cluster`""
             }
 
@@ -871,13 +951,12 @@ Function New-K8sControllerCluster{
 
             # Close SSH Session
             # Remove-SSHSession -SessionId $SSHSessionID
-
-            # Restart VM
             $VMObject = Get-VM -Name "${Name}"
-            # Restart-VM -VM $VMObject -Confirm:$False > $Null
 
             $Status = 'toolsNotRunning'
-            while ($Status -eq 'toolsNotRunning'){
+
+            while ($Status -eq 'toolsNotRunning')
+            {
                 $status = (Get-VM -name "$($VMObject.Name)" | Get-View).Guest.ToolsStatus
                 
                 Write-Host -NoNewline -Object "$($VMObject.Name) (Restart): VMware Tools Status [" 
@@ -894,7 +973,8 @@ Function New-K8sControllerCluster{
 }
 
 
-Function New-K8sWorkerCluster{
+Function New-K8sWorkerCluster
+{
     PARAM(
         [parameter(mandatory=$false)]
         [string]
@@ -960,15 +1040,22 @@ Function New-K8sWorkerCluster{
         [string]
         $EtcdEndpoints
     )
-    BEGIN{
+    BEGIN
+    {
         Write-Host -NoNewline -Object "Deploying worker count ["
         Write-Host -NoNewline -ForegroundColor 'green' -Object "${Count}"
         Write-Host -Object "]"
     }
-    PROCESS{
-        For($w = 0; $w -lt $Count ; $w++){
+    PROCESS
+    {
+        For($w = 0; $w -lt $Count ; $w++)
+        {
             $Name = "${NamePrefix}$("{0:D3}" -f $($w +1))"
             $IP = New-K8sIpAddress -Subnet $Subnet -StartFrom $StartFrom -Count $($w +1)
+
+            Write-Host -NoNewline -Object "Deploying etcd host ["
+            Write-Host -NoNewline -ForegroundColor 'cyan' -Object ($w +1)
+            Write-Host -Object "]"
 
             # Cloud Config
             $ConfigPath = "${pwd}\conf\worker\$Name\openstack\latest\user-data"
@@ -989,23 +1076,28 @@ Function New-K8sWorkerCluster{
                 'guestinfo.interface.0.route.0.destination' = '0.0.0.0/0'
             }
             # Add DNS records to GuestInfo
-            For( $d = 0; $d -le $DNS.Length -1 ; $d++){
+            For( $d = 0; $d -le $DNS.Length -1 ; $d++)
+            {
                 $GuestInfo += @{"guestinfo.dns.server.$($d +1)" = $DNS[$d]}
             }
 
             # Provision, Configure and Start VM
-            If($VMHost -and $Cluster){
+            If($VMHost -and $Cluster)
+            {
                 Throw "Processing VMhost and Cluster is not supported"
             }
-            ElseIf($VMHost){
+            ElseIf($VMHost)
+            {
                 Import-CoreOS -Name "${Name}" -DataStore "${DataStore}" -VMHost "${VMHost}" -PortGroup "${PortGroup}" -DiskStorageFormat "${DiskstorageFormat}"
                 Write-CoreOSCloudConfig -Name "${Name}" -GuestInfo $GuestInfo -CloudConfigPath "${ConfigPath}" -VMHost "${VMHost}"
             }
-            ElseIf($Cluster){
+            ElseIf($Cluster)
+            {
                 Import-CoreOS -Name "${Name}" -DataStore "${DataStore}" -Cluster "${Cluster}" -PortGroup "${PortGroup}" -DiskStorageFormat "${DiskstorageFormat}"
                 Write-CoreOSCloudConfig -Name "${Name}" -GuestInfo $GuestInfo -CloudConfigPath "${ConfigPath}" -Cluster "${Cluster}"               
             }
-            Else{
+            Else
+            {
                 Throw "Missing vSphere hosting agurment:`"-VMHost`" or `"-Cluster`""
             }
 
@@ -1025,13 +1117,11 @@ Function New-K8sWorkerCluster{
 
             # Close SSH Session
             # Remove-SSHSession -SessionId 0
-
-            # Restart VM
             $VMObject = Get-VM -Name "${Name}"
-            # Restart-VM -VM $VMObject -Confirm:$False > $Null
 
             $Status = 'toolsNotRunning'
-            while ($Status -eq 'toolsNotRunning'){
+            while ($Status -eq 'toolsNotRunning')
+            {
                 $status = (Get-VM -name "$($VMObject.Name)" | Get-View).Guest.ToolsStatus
                 
                 Write-Host -NoNewline -Object "$($VMObject.Name) (Restart): VMware Tools Status [" 
@@ -1048,7 +1138,8 @@ Function New-K8sWorkerCluster{
 }
 
 
-Function Test-TcpConnection{
+Function Test-TcpConnection
+{
     PARAM(
         [parameter(mandatory=$true)]
         [string[]]
@@ -1066,8 +1157,10 @@ Function Test-TcpConnection{
         [switch]
         $Loop
     )
-    BEGIN{
-        Function Start-Connect{
+    BEGIN
+    {
+        Function Start-Connect
+        {
             $Socket = New-Object -TypeName 'System.Net.Sockets.TcpClient'
             $IAsyncResult = [IAsyncResult] $Socket.BeginConnect($Computer, $Target, $null, $null)
             $Wait = Measure-Command { $Result = $iasyncresult.AsyncWaitHandle.WaitOne($Timeout, $true) } | % totalseconds
@@ -1081,12 +1174,17 @@ Function Test-TcpConnection{
             }
         }
     }
-    PROCESS{
-        ForEach($Computer in $ComputerName){
-            ForEach($Target in $Port){
-                If($Loop){
+    PROCESS
+    {
+        ForEach($Computer in $ComputerName)
+        {
+            ForEach($Target in $Port)
+            {
+                If($Loop)
+                {
                     $Connected = $False
-                    While($Connected -eq $False){
+                    While($Connected -eq $False)
+                    {
                         Start-Sleep -Seconds 1
                         $CommandResult = Start-Connect
                         Write-Host -NoNewline -Object "$($CommandResult.To): listening on tcp port:`"$($CommandResult.Port)`" ["
@@ -1098,13 +1196,15 @@ Function Test-TcpConnection{
                             
                             Write-Output -InputObject $CommandResult
                         }
-                        Else{
+                        Else
+                        {
                             Write-Host -NoNewline -ForegroundColor 'red' -Object "$($CommandResult.Connected)"
                             Write-Host -Object "]"
                         }
                     }
                 }
-                Else{
+                Else
+                {
                     Start-Connect
                 }
             }
