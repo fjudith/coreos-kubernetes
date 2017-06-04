@@ -202,7 +202,7 @@ Function Send-SSHMachineSSL{
         $SSHSession
     )
     BEGIN{
-        $ZipFile = "${pwd}/${CommonName}.zip"
+        $ZipFile = "${pwd}\ssl\${CommonName}.zip"
         $IPString = @()
         For($i = 0 ; $i -lt $IpAddresses.Length; $i++){$IPString += "IP.$($i +1) = $($IpAddresses[$i])"}
     }
@@ -483,13 +483,13 @@ General notes
         [String]
         $Subnet,
 
-        [parameter(manadatory=$true)]
+        [parameter(mandatory=$true)]
         [String]
-        $StartFrom = '50',
+        $StartFrom = 50,
 
         [parameter(mandatory=$false)]
         [Int]
-        $Count
+        $Count = 1
     )
     PROCESS{
         # Parse Subnet address to extract the first 3 octets
@@ -508,11 +508,11 @@ Function Get-K8sEtcdIP{
         
         [parameter(mandatory=$false)]
         [int]
-        $StartFrom = '50',
+        $StartFrom = 50,
 
         [parameter(mandatory=$false)]
         [int]
-        $Count = '1'
+        $Count = 1
     )
     BEGIN{
         $IpArray = @()
@@ -532,7 +532,7 @@ Function Get-K8sEtcdIP{
 
 Function Get-K8sEtcdInitialCluster{
     PARAM(
-        [paramter(mandatory=$false)]
+        [parameter(mandatory=$false)]
         [string]
         $NamePrefix = 'etcd',
 
@@ -568,9 +568,9 @@ Function Get-K8sEtcdEndpoint{
         [string]
         $Protocol = 'http',
 
-        [paramter(mandatory=$false)]
+        [parameter(mandatory=$false)]
         [int]
-        $port = '2379'
+        $port = 2379
     )
     BEGIN{
         $ClusterArray = @()
@@ -598,15 +598,15 @@ Function Get-K8sControllerIP{
         
         [parameter(mandatory=$false)]
         [int]
-        $StartFrom = '100',
+        $StartFrom = 100,
 
         [parameter(mandatory=$false)]
         [int]
-        $Count = '1',
+        $Count = 1,
         
         [parameter(mandatory=$false)]
         [string]
-        $ControllerCluser = '10.3.0.1'
+        $ControllerCluster = '10.3.0.1'
     )
     BEGIN{
         $IpArray = @()
@@ -646,11 +646,11 @@ Function New-K8sEtcdCluster{
 
         [parameter(mandatory=$false)]
         [int]
-        $StartFrom = '50',
+        $StartFrom = 50,
 
         [parameter(mandatory=$false)]
         [int]
-        $Count = '1',
+        $Count = 1,
 
         [parameter(mandatory=$false)]
         [string]
@@ -681,21 +681,28 @@ Function New-K8sEtcdCluster{
         $CloudConfigFile = "${pwd}\etcd-cloud-config.yaml"
     )
     BEGIN{
-        Write-Verbose -Message "Provisionning `"${Count}`" etcd hosts"
-
         $IpAddresses = New-K8sIpAddress -Subnet $Subnet -StartFrom $StartFrom -Count $Count
         $EtcdCluster = Get-K8sEtcdInitialCluster -NamePrefix $NamePrefix -IpAddress $IpAddresses
+
+        Write-Host -NoNewline -Object "Deploying etcd count ["
+        Write-Host -NoNewline -ForegroundColor 'green' -Object "${Count}"
+        Write-Host -Object "]"
     }
     PROCESS{
-        For($i = 0; $i -lt $Count; $i++){
-            $Name = "${NamePrefix}$("{0:D3}" -f $($i +1))"
-            $IP = New-K8sIpAddress -Subnet $Subnet -StartFrom $StartFrom -Count $($i +1)
+        For($e = 0; $e -lt $Count ; $e++){
+            $Name = "${NamePrefix}$("{0:D3}" -f $($e +1))"
+            $IP = New-K8sIpAddress -Subnet $Subnet -StartFrom $StartFrom -Count $($e +1)
+
+            Write-Host -NoNewline -Object "Deploying etcd host ["
+            Write-Host -NoNewline -ForegroundColor 'green' -Object $e
+            Write-Host -Object "]"
             
             $ConfigPath = "${pwd}\conf\etcd\$Name\openstack\latest\user-data"
 
             New-Item -Force -ItemType 'Directory' -Path $(([System.IO.fileInfo]$ConfigPath).DirectoryName) > $Null
 
-            $Config = $(Get-Content -Path "${pwd}\${$CloudConfigFile}") -Replace '\{\{ETCD_NODE_NAME\}\}',$Name
+            $Config = Get-Content -Path "${CloudConfigFile}" 
+            $Congig = $Config -Replace '\{\{ETCD_NODE_NAME\}\}',$Name
             $Config = $Config -Replace '\{\{ETCD_INITIAL_CLUSTER\}\}',$EtcdCluster
             Set-Content -Path $ConfigPath -Value $Config
 
@@ -710,8 +717,8 @@ Function New-K8sEtcdCluster{
             }
 
             # Add DNS records to GuestInfo
-            For( $i = 0; $i -le $DNS.Length ; $i++){
-                $GuestInfo += @{"guestinfo.dns.server.$($i)" = $DNS[$i]}
+            For( $d = 0; $d -le $DNS.Length -1 ; $d++){
+                $GuestInfo += @{"guestinfo.dns.server.$($d +1)" = $DNS[$d]}
             }
 
             # Provision, Configure and Start VM
@@ -755,11 +762,11 @@ Function New-K8sControllerCluster{
 
         [parameter(mandatory=$false)]
         [int]
-        $StartFrom = '100',
+        $StartFrom = 100,
 
         [parameter(mandatory=$false)]
         [int]
-        $Count = '1',
+        $Count = 1,
 
         [parameter(mandatory=$false)]
         [string]
@@ -791,21 +798,23 @@ Function New-K8sControllerCluster{
         
         [parameter(mandatory=$false)]
         [PSCredential]
-        $Credential,
+        $SSHCredential,
 
         [parameter(mandatory=$false)]
         [string]
         $InstallScript
     )
     BEGIN{
-        Write-Verbose -Message "Provisionning `"${Count}`" controller hosts"
-
         $IpAddresses = New-K8sIpAddress -Subnet $Subnet -StartFrom $StartFrom -Count $Count
+        
+        Write-Host -NoNewline -Object "Deploying controller count ["
+        Write-Host -NoNewline -ForegroundColor 'green' -Object "${Count}"
+        Write-Host -Object "]"
     }
     PROCESS{
-        For($i = 0; $i -lt $Count; $i++){
-            $Name = "${NamePrefix}$("{0:D3}" -f $($i +1))"
-            $IP = New-K8sIpAddress -Subnet $Subnet -StartFrom $StartFrom -Count $($i +1)
+        For($c = 0; $c -lt $Count ; $c++){
+            $Name = "${NamePrefix}$("{0:D3}" -f $($c +1))"
+            $IP = New-K8sIpAddress -Subnet $Subnet -StartFrom $StartFrom -Count $($c +1)
 
             # Cloud Config
             $ConfigPath = "${pwd}\conf\controller\$Name\openstack\latest\user-data"
@@ -825,8 +834,8 @@ Function New-K8sControllerCluster{
             }
             
             # Add DNS records to GuestInfo
-            For( $i = 0; $i -le $DNS.Length ; $i++){
-                $GuestInfo += @{"guestinfo.dns.server.$($i)" = $DNS[$i]}
+            For( $d = 0; $d -le $DNS.Length -1 ; $d++){
+                $GuestInfo += @{"guestinfo.dns.server.$($d +1)" = $DNS[$d]}
             }
 
             # Provision, Configure and Start VM
@@ -845,7 +854,7 @@ Function New-K8sControllerCluster{
                 Throw "Missing vSphere hosting agurment:`"-VMHost`" or `"-Cluster`""
             }
 
-            Start-Sleep -Seconds 30
+            Test-TcpConnection -ComputerName $IP -Port 22 -Loop
 
             # Open SSH Session
             $SSHSessionID = $(New-SSHSession -ComputerName $IP -Credential $SSHCredential -Force).SessionID
@@ -861,7 +870,7 @@ Function New-K8sControllerCluster{
             Invoke-SSHCommand -Index $SSHSessionID -Command 'sudo systemctl enable docker && sudo reboot' -ErrorAction 'silentlycontinue'
 
             # Close SSH Session
-            Remove-SSHSession -SessionId $SSHSessionID
+            # Remove-SSHSession -SessionId $SSHSessionID
 
             # Restart VM
             $VMObject = Get-VM -Name "${Name}"
@@ -905,11 +914,11 @@ Function New-K8sWorkerCluster{
 
         [parameter(mandatory=$false)]
         [int]
-        $StartFrom = '200',
+        $StartFrom = 200,
 
         [parameter(mandatory=$false)]
         [int]
-        $Count = '1',
+        $Count = 1,
 
         [parameter(mandatory=$false)]
         [string]
@@ -952,12 +961,14 @@ Function New-K8sWorkerCluster{
         $EtcdEndpoints
     )
     BEGIN{
-        Write-Verbose -Message "Provisionning `"${Count}`" worker hosts"
+        Write-Host -NoNewline -Object "Deploying worker count ["
+        Write-Host -NoNewline -ForegroundColor 'green' -Object "${Count}"
+        Write-Host -Object "]"
     }
     PROCESS{
-        For($i = 0; $i -lt $Count; $i++){
-            $Name = "${NamePrefix}$("{0:D3}" -f $($i +1))"
-            $IP = Get-WorkerIP -Subnet $Subnet -Number $($i +1)
+        For($w = 0; $w -lt $Count ; $w++){
+            $Name = "${NamePrefix}$("{0:D3}" -f $($w +1))"
+            $IP = New-K8sIpAddress -Subnet $Subnet -StartFrom $StartFrom -Count $($w +1)
 
             # Cloud Config
             $ConfigPath = "${pwd}\conf\worker\$Name\openstack\latest\user-data"
@@ -978,8 +989,8 @@ Function New-K8sWorkerCluster{
                 'guestinfo.interface.0.route.0.destination' = '0.0.0.0/0'
             }
             # Add DNS records to GuestInfo
-            For( $i = 0; $i -le $DNS.Length ; $i++){
-                $GuestInfo += @{"guestinfo.dns.server.$($i)" = $DNS[$i]}
+            For( $d = 0; $d -le $DNS.Length -1 ; $d++){
+                $GuestInfo += @{"guestinfo.dns.server.$($d +1)" = $DNS[$d]}
             }
 
             # Provision, Configure and Start VM
@@ -998,22 +1009,22 @@ Function New-K8sWorkerCluster{
                 Throw "Missing vSphere hosting agurment:`"-VMHost`" or `"-Cluster`""
             }
 
-            Start-Sleep -Seconds 30
+            Test-TcpConnection -ComputerName $IP -Port 22 -Loop
 
             # Open SSH Session
             $SSHSessionID = $(New-SSHSession -ComputerName $IP -Credential $SSHCredential -Force).SessionID
 
             Send-SSHMachineSSL -Machine $Name -CertificateBaseName 'worker' -CommonName "kube-worker-${IP}" -IpAddresses $IP `
-            -Computername $IP -Credental $SSHCredential -SSHSession $SSHSessionID
+            -Computername $IP -Credential $SSHCredential -SSHSession $SSHSessionID
 
             # Copy kubernetes worker configuration asset
-            Set-ScpFile -Force -LocalFile "${CloudConfigPath}" -RemotePath '/tmp/' -ComputerName $IP -Credential $SSHCredential
+            Set-ScpFile -Force -LocalFile "${InstallScript}" -RemotePath '/tmp/' -ComputerName $IP -Credential $SSHCredential
             Invoke-SSHCommand -Index $SSHSessionID -Command 'cd /tmp/ && mv worker-install.sh vsphere-user-data'
             Invoke-SSHCommand -Index $SSHSessionID -Command 'sudo mkdir -p /var/lib/coreos-vsphere && sudo mv /tmp/vsphere-user-data /var/lib/coreos-vsphere/'
             Invoke-SSHCommand -Index $SSHSessionID -Command 'sudo systemctl enable docker && sudo reboot' -ErrorAction 'silentlycontinue'
 
             # Close SSH Session
-            Remove-SSHSession -SessionId 0
+            # Remove-SSHSession -SessionId 0
 
             # Restart VM
             $VMObject = Get-VM -Name "${Name}"
@@ -1032,6 +1043,71 @@ Function New-K8sWorkerCluster{
             Write-Host -NoNewline -Object "$($VMObject.Name) (Restart): VMware Tools Status [" 
             Write-Host -NoNewline -ForegroundColor 'green' -Object $Status
             Write-Host -Object "]"
+        }
+    }
+}
+
+
+Function Test-TcpConnection{
+    PARAM(
+        [parameter(mandatory=$true)]
+        [string[]]
+        $ComputerName,
+
+        [parameter(mandatory=$true)]
+        [string[]]
+        $Port,
+
+        [parameter(mandatory=$False)]
+        [string]
+        $Timeout = 3000,
+
+        [parameter(mandatory=$False)]
+        [switch]
+        $Loop
+    )
+    BEGIN{
+        Function Start-Connect{
+            $Socket = New-Object -TypeName 'System.Net.Sockets.TcpClient'
+            $IAsyncResult = [IAsyncResult] $Socket.BeginConnect($Computer, $Target, $null, $null)
+            $Wait = Measure-Command { $Result = $iasyncresult.AsyncWaitHandle.WaitOne($Timeout, $true) } | % totalseconds
+            New-Object -TypeName 'PsObject' -Property @{
+                'From' = $env:ComputerName ;
+                'To' = $Computer ;
+                'Port' = $Target ;
+                'Timeout' = $Timeout ;
+                'Connected' = $Socket.Connected ;
+                'Timing' = $Wait ;
+            }
+        }
+    }
+    PROCESS{
+        ForEach($Computer in $ComputerName){
+            ForEach($Target in $Port){
+                If($Loop){
+                    $Connected = $False
+                    While($Connected -eq $False){
+                        Start-Sleep -Seconds 1
+                        $CommandResult = Start-Connect
+                        Write-Host -NoNewline -Object "$($CommandResult.To): listening on tcp port:`"$($CommandResult.Port)`" ["
+                        If($(Start-Connect).Connected){
+                            Write-Host -NoNewline -ForegroundColor 'green' -Object "$($CommandResult.Connected)"
+                            Write-Host -Object "]"
+                            
+                            $Connected = $True
+                            
+                            Write-Output -InputObject $CommandResult
+                        }
+                        Else{
+                            Write-Host -NoNewline -ForegroundColor 'red' -Object "$($CommandResult.Connected)"
+                            Write-Host -Object "]"
+                        }
+                    }
+                }
+                Else{
+                    Start-Connect
+                }
+            }
         }
     }
 }

@@ -54,13 +54,13 @@ PARAM(
 BEGIN{
     Set-StrictMode -Version 5
 
-    $ErrorActionPreference = 'stop'
+    #$ErrorActionPreference = 'stop'
 
     # Import Powershell Module
     Import-Module -Name 'VMware.VimAutomation.Core'
     Connect-Viserver 'vcenter.economat.local' -User 'fjudith@economat.local' -Password 'Dj43l1ss.03'
-    Import-Module -Name "${pwd}\Modules\K8s-vSphere"
-    Import-module -Name "${pwd}\Modules\Posh-SSH"
+    Import-Module -Force -Name "${pwd}\Modules\K8s-vSphere"
+    Import-module -Force -Name "${pwd}\Modules\Posh-SSH"
 
     # Load Machine configuration from config
     $Config = ([System.IO.FileInfo]"${pwd}\config.rb").FullName
@@ -102,7 +102,7 @@ BEGIN{
 
 
     # Building a single string for Etcd Endpoints Node list containing Etcd URLs as per given etcd count
-    $EtcdEndpoints = Get-K8sEtcEndpoints -IpAddress $EtcdIPs -Protocol 'http' -Port '2379'
+    $EtcdEndpoints = Get-K8sEtcdEndpoint -IpAddress $EtcdIPs -Protocol 'http' -Port '2379'
 
     Write-Host -NoNewline -Object "Etcd endpoints ["
     Write-Host -NoNewline -ForegroundColor 'green' -Object "${EtcdEndpoints}"
@@ -110,7 +110,7 @@ BEGIN{
 
     # Building array of Controller IP addresses as per given controller count
     # Adding Controller Cluster IP address at the end of the list
-    $ControllerIPs = Get-K8sControllerIP -Subnet $ControllerSubnet -StartFrom $StartFrom -Count $ControllerCount -ControllerCluster $ControllerClusterIP
+    $ControllerIPs = Get-K8sControllerIP -Subnet $ControllerSubnet -StartFrom $ControllerStartFrom -Count $ControllerCount -ControllerCluster $ControllerClusterIP
     
     Write-Host -NoNewline -Object "Controller IP Adresses ["
     Write-Host -NoNewline -ForegroundColor 'green' -Object "${ControllerIPs}"
@@ -141,53 +141,57 @@ PROCESS{
     ##################################################
     if($VMHost){
         New-K8sEtcdCluster -VMhost $VMHost `
-        -Subnet $EtcdSubnet -CIDR $EctdCIDR -Gateway $EtcdGateway -DNS $DnsServer `
-        -StartFrom 50 -Count $EtcdCount -NamePrefix $EtcdNamePrefix `
+        -Subnet $EtcdSubnet -CIDR $EtcdCIDR -Gateway $EtcdGateway -DNS $DnsServer `
+        -StartFrom $EtcdStartFrom -Count $EtcdCount -NamePrefix $EtcdNamePrefix `
         -DataStore $Datastore -PortGroup $PortGroup -DiskstorageFormat $DiskStorageFormat `
-        -CloudConfigFile -$EtcdCloudConfigFile
+        -CloudConfigFile $EtcdCloudConfigFile
     }
     ElseIf($Cluster){
         New-K8sEtcdCluster -Cluster $Cluster `
-        -Subnet $EtcdSubnet -CIDR $EctdCIDR -Gateway $EtcdGateway -DNS $DnsServer `
-        -StartFrom 50 -Count $EtcdCount -NamePrefix $EtcdNamePrefix `
+        -Subnet $EtcdSubnet -CIDR $EtcdCIDR -Gateway $EtcdGateway -DNS $DnsServer `
+        -StartFrom $EtcdStartFrom -Count $EtcdCount -NamePrefix $EtcdNamePrefix `
         -DataStore $Datastore -PortGroup $PortGroup -DiskstorageFormat $DiskStorageFormat `
-        -CloudConfigFile -$EtcdCloudConfigFile
+        -CloudConfigFile $EtcdCloudConfigFile
     }
 
     # Controller
     ##################################################
     if($VMHost){
         New-K8sControllerCluster -VMhost $VMHost `
-        -Subnet $ControllerSubnet -CIDR $EctdCIDR -Gateway $ControllerGateway -DNS $DnsServer `
-        -StartFrom 100 -Count $ControllerCount -NamePrefix $ControllerNamePrefix `
+        -Subnet $ControllerSubnet -CIDR $ControllerCIDR -Gateway $ControllerGateway -DNS $DnsServer `
+        -StartFrom $ControllerStartFrom -Count $ControllerCount -NamePrefix $ControllerNamePrefix `
         -DataStore $Datastore -PortGroup $PortGroup -DiskstorageFormat $DiskStorageFormat `
-        -CloudConfigFile -$ControllerCloudConfigFile -InstallScript $ControllerCloudConfigPath
+        -CloudConfigFile $ControllerCloudConfigFile -InstallScript $ControllerCloudConfigPath `
+        -SSHCredential $SSHCredential
     }
     ElseIf($Cluster){
         New-K8sControllerCluster -Cluster $Cluster `
-        -Subnet $ControllerSubnet -CIDR $EctdCIDR -Gateway $ControllerGateway -DNS $DnsServer `
-        -StartFrom 100 -Count $ControllerCount -NamePrefix $ControllerNamePrefix `
+        -Subnet $ControllerSubnet -CIDR $ControllerCIDR -Gateway $ControllerGateway -DNS $DnsServer `
+        -StartFrom $ControllerStartFrom -Count $ControllerCount -NamePrefix $ControllerNamePrefix `
         -DataStore $Datastore -PortGroup $PortGroup -DiskstorageFormat $DiskStorageFormat `
-        -CloudConfigFile -$ControllerCloudConfigFile -InstallScript $ControllerCloudConfigPath
+        -CloudConfigFile $ControllerCloudConfigFile -InstallScript $ControllerCloudConfigPath `
+        -SSHCredential $SSHCredential
     }
 
-    # Workder
+    # Worker
     ##################################################
     if($VMHost){
-        New-K8sWorkderCluster -VMhost $VMHost `
-        -Subnet $WorkderSubnet -CIDR $EctdCIDR -Gateway $WorkderGateway -DNS $DnsServer `
-        -StartFrom 100 -Count $WorkderCount -NamePrefix $WorkderNamePrefix `
+        New-K8sWorkerCluster -VMhost $VMHost `
+        -Subnet $WorkerSubnet -CIDR $WorkerCIDR -Gateway $WorkerGateway -DNS $DnsServer `
+        -StartFrom $WorkerStartFrom -Count $WorkerCount -NamePrefix $WorkerNamePrefix `
         -DataStore $Datastore -PortGroup $PortGroup -DiskstorageFormat $DiskStorageFormat `
-        -CloudConfigFile -$WorkderCloudConfigFile -InstallScript $WorkerCloudConfigPath `
-        -EtcdEndpoints $EtcdEndpoints
+        -CloudConfigFile $WorkerCloudConfigFile -InstallScript $WorkerCloudConfigPath `
+        -EtcdEndpoints $EtcdEndpoints `
+        -SSHCredential $SSHCredential
     }
     ElseIf($Cluster){
-        New-K8sWorkderCluster -Cluster $Cluster `
-        -Subnet $WorkderSubnet -CIDR $EctdCIDR -Gateway $WorkderGateway -DNS $DnsServer `
-        -StartFrom 100 -Count $WorkderCount -NamePrefix $WorkderNamePrefix `
+        New-K8sWorkerCluster -Cluster $Cluster `
+        -Subnet $WorkerSubnet -CIDR $WorkerCIDR -Gateway $WorkerGateway -DNS $DnsServer `
+        -StartFrom $WorkerStartFrom -Count $WorkerCount -NamePrefix $WorkerNamePrefix `
         -DataStore $Datastore -PortGroup $PortGroup -DiskstorageFormat $DiskStorageFormat `
-        -CloudConfigFile -$WorkderCloudConfigFile -InstallScript $WorkerCloudConfigPath `
-        -EtcdEndpoints $EtcdEndpoints
+        -CloudConfigFile $WorkerCloudConfigFile -InstallScript $WorkerCloudConfigPath `
+        -EtcdEndpoints $EtcdEndpoints `
+        -SSHCredential $SSHCredential
     }
 }
 END{
