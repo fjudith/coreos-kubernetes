@@ -1,5 +1,25 @@
 Function Write-K8sCACertificate
 {
+<#
+.SYNOPSIS
+Generate the SSL Certificate Authority certificate set for Kubernetes. 
+
+.DESCRIPTION
+Use OpenSSL to create the SSL Certificate Authority certificate set for Kubernetes.
+
+.PARAMETER OutputPath
+Specifies the directory where the CA private key and certicate will be written.
+
+.EXAMPLE
+PS C:\>Write-K8sCACertficate -Output Path "${pwd}\ssl"
+
+    Directory: C:\Users\fjudith\Git\coreos-kubernetes\multi-node\vsphere-powercli\ssl
+
+Mode                LastWriteTime         Length Name
+----                -------------         ------ ----
+-a----       04/06/2017     11:19           1706 ca-key.pem
+-a----       04/06/2017     11:19           1112 ca.pem
+#>
     PARAM(
         [parameter(mandatory=$True)]
         [String]
@@ -26,19 +46,16 @@ Function Write-K8sCACertificate
     {
         # Generate private key
         Write-Verbose -Message "Generating CA certificate private key path:`"$KeyFile`""
-        $Log = "${KeyFile}.log"
         
         Start-Process -ErrorAction 'Stop' -Wait -WorkingDirectory $pwd -FilePath $OpenSSLBinary -ArgumentList (
             "genrsa",
             "-out",
             "`"${KeyFile}`"",
             "2048"
-        ) -NoNewWindow -RedirectStandardOutput $Log
+        ) -NoNewWindow
 
         # Generate Certificate
         Write-Verbose -Message "Generating certificate path:`"$PEMFile`""
-        
-        $Log = "${PEMFile}.log"
 
         Start-Process -ErrorAction 'Stop' -Wait -WorkingDirectory $pwd -FilePath $OpenSSLBinary -ArgumentList (
             "req",
@@ -49,7 +66,7 @@ Function Write-K8sCACertificate
             "-days 10000",
             "-out `"$PEMFile`"",
             "-subj `"/CN=kube-ca`""
-        ) -NoNewWindow -RedirectStandardOutput $Log
+        ) -NoNewWindow
     }
     END
     {
@@ -60,6 +77,49 @@ Function Write-K8sCACertificate
 
 Function Write-K8sCertificate
 {
+<#
+.SYNOPSIS
+Create a Zip archive containing SSL certificate set for a Kubernetes host.
+
+ - apiserver-key.pem
+ - apiserver-req.cnf
+ - apiserver.csr
+ - apiserver.pem
+ - kube-apiserver-192.168.251.101.zip
+
+.DESCRIPTION
+Use OpenSSL and Compress-Archive  to create a Zip archive containing the SSL certificate set for a Kubernetes host.
+
+.PARAMETER OutputPath
+Specifies the directory where the following files will be written.
+  - Private Key
+  - Certificate Signing Request Template (CNF)
+  - Certificate Signing Request (CSR)
+  - Certificate
+  - Zip archive containing the above files
+
+.PARAMETER Name
+Specifies the name used to save the certificate set.
+
+.PARAMETER CommonName
+Specifies the certificate Common Name (CN).
+
+.PARAMETER SubjectAlternativeName
+Specifies the certificate Subject Alternative Name (SAN).
+
+.EXAMPLE
+PS C:\> Write-K8sCertificate -OutputPath "${pwd}\ssl" -Name 'k8sctrl001' -CommonName 'kube-ctrl-192.168.1.51' -SubjectAlternativeName 'IP.1 = 192.168.1.51'
+
+    Directory: C:\Users\fjudith\Git\coreos-kubernetes\multi-node\vsphere-powercli\ssl
+
+Mode                LastWriteTime         Length Name
+----                -------------         ------ ----
+-a----       04/06/2017     11:32           1706 apiserver-key.pem
+-a----       04/06/2017     11:32           1356 apiserver-req.cnf
+-a----       04/06/2017     11:32           1150 apiserver.csr
+-a----       04/06/2017     11:32           1220 apiserver.pem
+-a----       04/06/2017     11:26           3380 kube-apiserver-192.168.251.101.zip
+#>
     PARAM(
         [parameter(mandatory=$True)]
         [String]
@@ -511,10 +571,11 @@ Specifies the number representing the last octet of the ip address.
 Specifies the number that will be added to the last octet of the ip address (i.e. StartFrom parameter)
 
 .EXAMPLE
-Specifies the number
+PS C:\> New-k8sIpAddress -Subnet '10.0.0.0' -StartFrom 50 -Count 3
 
-.NOTES
-General notes
+10.0.0.53
+
+This command returns an ip address in the 10.0.0.0 subent with a last octet sets to "50 + 3"
 #>
     PARAM(
         [parameter(mandatory=$true)]
