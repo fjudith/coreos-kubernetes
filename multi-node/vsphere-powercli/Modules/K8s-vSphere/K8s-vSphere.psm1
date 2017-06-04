@@ -2,10 +2,13 @@ Function Write-K8sCACertificate
 {
 <#
 .SYNOPSIS
-Generate the SSL Certificate Authority certificate set for Kubernetes. 
+Generate the SSL Certificate Authority certificate asset for Kubernetes. 
+
+ - ca-key.pem
+ - ca.pem
 
 .DESCRIPTION
-Use OpenSSL to create the SSL Certificate Authority certificate set for Kubernetes.
+Use OpenSSL to create the SSL Certificate Authority certificate asset for Kubernetes.
 
 .PARAMETER OutputPath
 Specifies the directory where the CA private key and certicate will be written.
@@ -19,6 +22,8 @@ Mode                LastWriteTime         Length Name
 ----                -------------         ------ ----
 -a----       04/06/2017     11:19           1706 ca-key.pem
 -a----       04/06/2017     11:19           1112 ca.pem
+
+This command generate the CA certifcate asset in a subdirectory named "ssl" stored in workding directory.
 #>
     PARAM(
         [parameter(mandatory=$True)]
@@ -85,7 +90,7 @@ Create a Zip archive containing SSL certificate set for a Kubernetes host.
  - apiserver-req.cnf
  - apiserver.csr
  - apiserver.pem
- - kube-apiserver-192.168.251.101.zip
+ - kube-apiserver-CommonName.zip
 
 .DESCRIPTION
 Use OpenSSL and Compress-Archive  to create a Zip archive containing the SSL certificate set for a Kubernetes host.
@@ -108,7 +113,7 @@ Specifies the certificate Common Name (CN).
 Specifies the certificate Subject Alternative Name (SAN).
 
 .EXAMPLE
-PS C:\> Write-K8sCertificate -OutputPath "${pwd}\ssl" -Name 'k8sctrl001' -CommonName 'kube-ctrl-192.168.1.51' -SubjectAlternativeName 'IP.1 = 192.168.1.51'
+PS C:\> Write-K8sCertificate -OutputPath "${pwd}\ssl" -Name 'k8sctrl001' -CommonName 'kube-apiserver-192.168.1.51' -SubjectAlternativeName 'IP.1 = 192.168.1.51'
 
     Directory: C:\Users\fjudith\Git\coreos-kubernetes\multi-node\vsphere-powercli\ssl
 
@@ -118,7 +123,9 @@ Mode                LastWriteTime         Length Name
 -a----       04/06/2017     11:32           1356 apiserver-req.cnf
 -a----       04/06/2017     11:32           1150 apiserver.csr
 -a----       04/06/2017     11:32           1220 apiserver.pem
--a----       04/06/2017     11:26           3380 kube-apiserver-192.168.251.101.zip
+-a----       04/06/2017     11:26           3380 kube-apiserver-192.168.1.51.zip
+
+This command generates the host certifcate asset in a subdirectory named "ssl" stored in workding directory.
 #>
     PARAM(
         [parameter(mandatory=$True)]
@@ -242,11 +249,49 @@ Mode                LastWriteTime         Length Name
 
 Function Send-SSHMachineSSL
 {
-    PARAM(
-        [parameter(mandatory=$true)]
-        [string]
-        $Machine,
-        
+<#
+.SYNOPSIS
+Send a Zip containing a certificate asset to the target host using SSH Copy (scp).
+
+.DESCRIPTION
+This command relies on the PoshSSH module and Write-K8sCertificate to push a Zip archive containing the certificate asset to the target host using SSH Copy Protocol (scp).
+CA certificate attached to the archive must be name "ca.pem" and stored in the ".\ssl" directory.
+
+.PARAMETER CertificateBaseName
+Usually the hostname of the target machine used in the certificate creation process.
+
+.PARAMETER CommonName
+Certification common name (CN).
+
+.PARAMETER IpAddresses
+Specifies IP addresses to be added in the certificate subject alternative name (SAN).
+
+.PARAMETER Computername
+Specifies the computers target for SCP commands.
+
+.PARAMETER Credential
+Specifies a user account that has permission to perform the SSH action.
+
+.PARAMETER SSHSession
+Specifies the "New-SSHSession" session ID to be by the SSH commands.
+
+.EXAMPLE
+$SecureHostPassword = ConvertTo-SecureString "password" -AsPlainText -Force
+$SSHCredential = New-Object System.Management.Automation.PSCredential ("user", $SecureHostPassword)
+
+$SSHSessionID = $(New-SSHSession -ComputerName '192.168.1.51' -Credential $SSHCredential -Force).SessionID
+
+Send-SSHMachineSSL -CertificateBaseName 'apiserver' -CommonName "kube-apiserver-192.168.1.51" -IpAddresses 192.168.1.51 -Computername $IP -Credential $SSHCredential  -SSHSession $SSHSessionID
+
+This command line acheive the following tasks.
+ 1. Create a secure credential object
+ 2. Open an SSH session to a remote computer and retreive the session ID
+ 3. Generate and push the certificate archive to the remote computer.
+
+.NOTES
+General notes
+#>
+    PARAM(        
         [parameter(mandatory=$true)]
         [string]
         $CertificateBaseName, 
