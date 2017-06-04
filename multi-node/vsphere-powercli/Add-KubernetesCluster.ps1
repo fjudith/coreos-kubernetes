@@ -9,7 +9,7 @@ PARAM(
 
     # Etcd configuration
     [parameter(mandatory=$false)][String]$EtcdNamePrefix = 'etcd',
-    [parameter(mandatory=$false)][Int]$EtcdCount = 3,
+    [parameter(mandatory=$false)][Int]$EtcdCount = 1,
     [parameter(mandatory=$false)][Int]$EtcdVMMemory = 512,
     [parameter(mandatory=$false)][String]$EtcdSubnet = '192.168.251.0',
     [parameter(mandatory=$false)][Int]$EtcdCIDR = 24,
@@ -18,8 +18,8 @@ PARAM(
 
     # Kubernetes Controller configuration
     [parameter(mandatory=$false)][String]$ControllerNamePrefix = 'ctrl',
-    [parameter(mandatory=$false)][Int]$ControllerCount = 3,
-    [parameter(mandatory=$false)][Int]$ControllerVMMemory = 2048,
+    [parameter(mandatory=$false)][Int]$ControllerCount = 1,
+    [parameter(mandatory=$false)][Int]$ControllerVMMemory = 1024,
     [parameter(mandatory=$false)][String]$ControllerSubnet = '192.168.251.0',
     [parameter(mandatory=$false)][Int]$ControllerCIDR = 24,
     [parameter(mandatory=$false)][Int]$ControllerStartFrom = 100,
@@ -27,8 +27,8 @@ PARAM(
 
     # Kubernetes Worker configuration
     [parameter(mandatory=$false)][String]$WorkerNamePrefix = 'wrkr',
-    [parameter(mandatory=$false)][Int]$WorkerCount = 6,
-    [parameter(mandatory=$false)][Int]$WorkerVMMemory = 2048,
+    [parameter(mandatory=$false)][Int]$WorkerCount = 1,
+    [parameter(mandatory=$false)][Int]$WorkerVMMemory = 1024,
     [parameter(mandatory=$false)][Int]$WorkerVMCpu = 1,
     [parameter(mandatory=$false)][String]$WorkerSubnet = '192.168.251.0',
     [parameter(mandatory=$false)][Int]$WorkerCIDR = 24,
@@ -65,8 +65,9 @@ BEGIN{
     # Load Machine configuration from config
     $Config = ([System.IO.FileInfo]"${pwd}\config.ps1").FullName
     If (Test-Path $Config)
-    {
-        Invoke-Expression $(Get-Content $Config)
+    {   
+        # Get config file content, remove empty lines and invoke each line
+        Get-Content -Path $Config | ? {$_.trim() -ne "" } | Invoke-Expression
     }
 
     If ($WorkerVMMemory -le 1024)
@@ -87,34 +88,19 @@ BEGIN{
 
     # Building array of Etcd IP addresses as per given etcd count
     $EtcdIPs = Get-K8sEtcdIP -Subnet $EtcdSubnet -StartFrom $EtcdStartFrom -Count $EtcdCount
-    
-    Write-Host -NoNewline -Object "Etcd IP Adresses ["
-    Write-Host -NoNewline -ForegroundColor 'green' -Object "${EtcdIPs}"
-    Write-Host -Object "]"
-
 
     # Building a single string for Etcd Cluster Node list containing Etcd hostnames and URLs as per given etcd count
     $InitialEtcdCluster = Get-K8sEtcdInitialCluster -NamePrefix $EtcdNamePrefix -IpAddress $EtcdIPs
-
-    Write-Host -NoNewline -Object "Initial etcd cluster ["
-    Write-Host -NoNewline -ForegroundColor 'green' -Object "${InitialEtcdCluster}"
-    Write-Host -Object "]"
 
 
     # Building a single string for Etcd Endpoints Node list containing Etcd URLs as per given etcd count
     $EtcdEndpoints = Get-K8sEtcdEndpoint -IpAddress $EtcdIPs -Protocol 'http' -Port '2379'
 
-    Write-Host -NoNewline -Object "Etcd endpoints ["
-    Write-Host -NoNewline -ForegroundColor 'green' -Object "${EtcdEndpoints}"
-    Write-Host -Object "]"
 
     # Building array of Controller IP addresses as per given controller count
     # Adding Controller Cluster IP address at the end of the list
     $ControllerIPs = Get-K8sControllerIP -Subnet $ControllerSubnet -StartFrom $ControllerStartFrom -Count $ControllerCount -ControllerCluster $ControllerClusterIP
-    
-    Write-Host -NoNewline -Object "Controller IP Adresses ["
-    Write-Host -NoNewline -ForegroundColor 'green' -Object "${ControllerIPs}"
-    Write-Host -Object "]"
+
 }  
 PROCESS{
     
@@ -158,6 +144,7 @@ PROCESS{
 
     # Controller
     ##################################################
+
     if($VMHost)
     {
         New-K8sControllerCluster -VMhost $VMHost `
@@ -221,4 +208,5 @@ END{
     .\kubectl.exe config use-context vphere-multi
     .\kubectl.exe get nodes
     "
+
 }

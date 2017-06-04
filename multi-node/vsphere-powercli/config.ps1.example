@@ -2,7 +2,7 @@
 # Connect-Viserver 'vcenter.example.com' -User 'admin@example.com' -Password 'v3ry1ns3cur3p4ssw0rd'
 
 # $VMHost
-$Cluster ='Cluster-Prod'
+$Cluster ='clustername'
 $PortGroup = 'VM Network'
 $Datastore = 'datastore1'
 $DiskStorageFormat = 'thin'
@@ -21,16 +21,16 @@ $EtcdGateway = '192.168.1.254'
 
 # Kubernetes Controller configuration
 $ControllerNamePrefix = 'k8sctrl'
-$ControllerCount = 3
+$ControllerCount = 1
 $ControllerVMMemory = 1024
 $ControllerSubnet = '192.168.1.0'
 $ControllerCIDR = 24
-$ControllerStartFrom = 100,
+$ControllerStartFrom = 100
 $ControllerGateway = '192.168.1.254'
 
 # Kubernetes Worker configuration
 $WorkerNamePrefix = 'k8swork'
-$WorkerCount = 6
+$WorkerCount = 1
 $WorkerVMMemory = 1024
 $WorkerVMCpu = 1
 $WorkerSubnet = '192.168.1.0'

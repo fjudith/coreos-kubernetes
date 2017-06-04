@@ -559,8 +559,7 @@ Function Write-CoreOSCloudConfig
         $vmx += "guestinfo.coreos.config.data = $EncodedText" + "`n"
         $vmx += "guestinfo.coreos.config.data.encoding = base64" + "`n"
     
-        $GuestInfo.Keys | ForEach-Object
-        {
+        $GuestInfo.Keys | foreach{
             $vmx += "$($_) = $($GuestInfo[$_])" + "`n"
 
         }
@@ -672,7 +671,9 @@ Function Get-K8sEtcdIP
     }
     END
     {
-        Write-Verbose "etcd IP:`"$ClusterArray`""
+        Write-Host -NoNewline -Object "Etcd IP Adresses ["
+        Write-Host -NoNewline -ForegroundColor 'green' -Object "${EtcdIPs}"
+        Write-Host -Object "]"
 
         # Return the array containing the etcd ip address list
         Write-Output -InputObject $IpArray
@@ -696,16 +697,19 @@ Function Get-K8sEtcdInitialCluster
     }
     PROCESS
     {
-        For($i = 0 ; $i -le $IpAdress.Length; $i++)
+        For($cm = 0 ; $cm -le $IpAddress.Length -1 ; $cm++)
         {
-            $ClusterArray += "${NamePrefix}$("{0:D3}" -f $($i +1))=http://$($EtcdIPs[$i]):2380"
+            $ClusterArray += "${NamePrefix}$("{0:D3}" -f $($cm +1))=http://$($IpAddress[$cm]):2380"
         }
     }
     END
     {
         # Flatten the array with comma separators
         $ClusterArray = $ClusterArray -Join ','
-        Write-Verbose "Initial Etcd Cluster:`"$ClusterArray`""
+        
+        Write-Host -NoNewline -Object "Initial etcd cluster ["
+        Write-Host -NoNewline -ForegroundColor 'green' -Object "${ClusterArray}"
+        Write-Host -Object "]"
 
         # Return the array containing the etcd ip address list
         Write-Output -InputObject $ClusterArray
@@ -733,8 +737,7 @@ Function Get-K8sEtcdEndpoint
     }
     PROCESS
     {
-        Foreach($Item in $IpAddress)
-        {
+        Foreach($Item in $IpAddress){
             $ClusterArray += "${Protocol}://${Item}:${Port}"
         }
     }
@@ -742,7 +745,10 @@ Function Get-K8sEtcdEndpoint
     {
         # Flatten the array with comma separators
         $ClusterArray = $ClusterArray -Join ','
-        Write-Verbose "Etcd endpoints:`"$ClusterArray`""
+
+        Write-Host -NoNewline -Object "Etcd endpoints ["
+        Write-Host -NoNewline -ForegroundColor 'green' -Object "${EtcdEndpoints}"
+        Write-Host -Object "]"
 
         # Return the array containing the etcd ip address list
         Write-Output -InputObject $ClusterArray
@@ -782,7 +788,10 @@ Function Get-K8sControllerIP
     END
     {
         $IpArray += $ControllerCluser
-        Write-Verbose "Conroller IP:`"$ClusterArray`""
+        
+        Write-Host -NoNewline -Object "Controller IP Adresses ["
+        Write-Host -NoNewline -ForegroundColor 'green' -Object "${ControllerIPs}"
+        Write-Host -Object "]"
 
         # Return the array containing the controller ip address list
         Write-Output -InputObject $IpArray
@@ -847,12 +856,13 @@ Function New-K8sEtcdCluster
     )
     BEGIN
     {
-        $IpAddresses = New-K8sIpAddress -Subnet $Subnet -StartFrom $StartFrom -Count $Count
-        $EtcdCluster = Get-K8sEtcdInitialCluster -NamePrefix $NamePrefix -IpAddress $IpAddresses
-
         Write-Host -NoNewline -Object "Deploying etcd count ["
         Write-Host -NoNewline -ForegroundColor 'green' -Object "${Count}"
         Write-Host -Object "]"
+
+        $IpAddresses = Get-K8sEtcdIP -Subnet $Subnet -StartFrom $StartFrom -Count $Count
+
+        $EtcdCluster = Get-K8sEtcdInitialCluster -NamePrefix $NamePrefix -IpAddress $IpAddresses
     }
     PROCESS
     {
@@ -870,7 +880,7 @@ Function New-K8sEtcdCluster
             New-Item -Force -ItemType 'Directory' -Path $(([System.IO.fileInfo]$ConfigPath).DirectoryName) > $Null
 
             $Config = Get-Content -Path "${CloudConfigFile}" 
-            $Congig = $Config -Replace '\{\{ETCD_NODE_NAME\}\}',$Name
+            $Config = $Config -Replace '\{\{ETCD_NODE_NAME\}\}',$Name
             $Config = $Config -Replace '\{\{ETCD_INITIAL_CLUSTER\}\}',$EtcdCluster
             Set-Content -Path $ConfigPath -Value $Config
 
@@ -993,7 +1003,7 @@ Function New-K8sControllerCluster
             $Name = "${NamePrefix}$("{0:D3}" -f $($c +1))"
             $IP = New-K8sIpAddress -Subnet $Subnet -StartFrom $StartFrom -Count $($c +1)
 
-            Write-Host -NoNewline -Object "Deploying etcd host ["
+            Write-Host -NoNewline -Object "Deploying controller host ["
             Write-Host -NoNewline -ForegroundColor 'cyan' -Object ($c +1)
             Write-Host -Object "]"
 
@@ -1046,18 +1056,21 @@ Function New-K8sControllerCluster
             $SSHSessionID = $(New-SSHSession -ComputerName $IP -Credential $SSHCredential -Force).SessionID
 
             # Generate and copy SSL asset
-            Send-SSHMachineSSL -Machine $Name -CertificateBaseName 'apiserver' -CommonName "kube-apiserver-${IP}" -IpAddresses $IpAddresses `
+            Send-SSHMachineSSL -CertificateBaseName 'apiserver' -CommonName "kube-apiserver-${IP}" -IpAddresses $IpAddresses `
             -Computername $IP -Credential $SSHCredential  -SSHSession $SSHSessionID
                     
             # Copy kubernetes worker configuration asset
             Set-ScpFile -Force -LocalFile "${InstallScript}" -RemotePath '/tmp/' -ComputerName $IP -Credential $SSHCredential
             Invoke-SSHCommand -Index $SSHSessionID -Command 'cd /tmp/ && mv controller-install.sh vsphere-user-data'
             Invoke-SSHCommand -Index $SSHSessionID -Command 'sudo mkdir -p /var/lib/coreos-vsphere && sudo mv /tmp/vsphere-user-data /var/lib/coreos-vsphere/'
-            Invoke-SSHCommand -Index $SSHSessionID -Command 'sudo systemctl enable docker && sudo reboot' -ErrorAction 'silentlycontinue'
+            #Invoke-SSHCommand -Index $SSHSessionID -Command 'sudo systemctl enable docker'
 
             # Close SSH Session
             # Remove-SSHSession -SessionId $SSHSessionID
+            
+            # Restart Virtual Machine
             $VMObject = Get-VM -Name "${Name}"
+            Restart-VMGuest -VM $VMObject
 
             $Status = 'toolsNotRunning'
 
@@ -1159,7 +1172,7 @@ Function New-K8sWorkerCluster
             $Name = "${NamePrefix}$("{0:D3}" -f $($w +1))"
             $IP = New-K8sIpAddress -Subnet $Subnet -StartFrom $StartFrom -Count $($w +1)
 
-            Write-Host -NoNewline -Object "Deploying etcd host ["
+            Write-Host -NoNewline -Object "Deploying worker host ["
             Write-Host -NoNewline -ForegroundColor 'cyan' -Object ($w +1)
             Write-Host -Object "]"
 
@@ -1212,20 +1225,24 @@ Function New-K8sWorkerCluster
             # Open SSH Session
             $SSHSessionID = $(New-SSHSession -ComputerName $IP -Credential $SSHCredential -Force).SessionID
 
-            Send-SSHMachineSSL -Machine $Name -CertificateBaseName 'worker' -CommonName "kube-worker-${IP}" -IpAddresses $IP `
+            Send-SSHMachineSSL -CertificateBaseName 'worker' -CommonName "kube-worker-${IP}" -IpAddresses $IP `
             -Computername $IP -Credential $SSHCredential -SSHSession $SSHSessionID
 
             # Copy kubernetes worker configuration asset
             Set-ScpFile -Force -LocalFile "${InstallScript}" -RemotePath '/tmp/' -ComputerName $IP -Credential $SSHCredential
             Invoke-SSHCommand -Index $SSHSessionID -Command 'cd /tmp/ && mv worker-install.sh vsphere-user-data'
             Invoke-SSHCommand -Index $SSHSessionID -Command 'sudo mkdir -p /var/lib/coreos-vsphere && sudo mv /tmp/vsphere-user-data /var/lib/coreos-vsphere/'
-            Invoke-SSHCommand -Index $SSHSessionID -Command 'sudo systemctl enable docker && sudo reboot' -ErrorAction 'silentlycontinue'
+            #Invoke-SSHCommand -Index $SSHSessionID -Command 'sudo systemctl enable docker'
 
             # Close SSH Session
-            # Remove-SSHSession -SessionId 0
+            # Remove-SSHSession -SessionId $SSHSessionID
+            
+            # Restart Virtual Machine
             $VMObject = Get-VM -Name "${Name}"
+            Restart-VMGuest -VM $VMObject
 
             $Status = 'toolsNotRunning'
+
             while ($Status -eq 'toolsNotRunning')
             {
                 $status = (Get-VM -name "$($VMObject.Name)" | Get-View).Guest.ToolsStatus
@@ -1282,10 +1299,8 @@ Function Test-TcpConnection
     }
     PROCESS
     {
-        ForEach($Computer in $ComputerName)
-        {
-            ForEach($Target in $Port)
-            {
+        ForEach($Computer in $ComputerName){
+            ForEach($Target in $Port){
                 If($Loop)
                 {
                     $Connected = $False
