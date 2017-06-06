@@ -216,7 +216,7 @@ This command generates the host certifcate asset in a subdirectory named "ssl" s
             "-new",
             "-key `"$KeyFile`"",
             "-out `"$CSRFile`"",
-            "-subj `"/CN=$CommonName`"",
+            "-subj `"/CN=${CommonName}/O=system:masters`"",
             "-config `"$ConfigFile`""
         ) -NoNewWindow
 
