@@ -12,8 +12,8 @@ coreos:
   update:
     reboot-strategy: "off"
   units:
-    - name: docker.service
-      command: start
+    #- name: docker.service
+    #  command: start
     - name: coreos-cloudinit-vsphere-mkdir.service
       command: start
       runtime: yes
@@ -31,13 +31,13 @@ coreos:
 write_files:
   - path: /etc/environment
     owner: root
-    permissions: '0644'
+    permissions: '0666'
     content: |
       COREOS_PUBLIC_IPV4=$private_ipv4
       COREOS_PRIVATE_IPV4=$private_ipv4
   - path: /run/coreos-kubernetes/options.env
     owner: root
-    permissions: '0644'
+    permissions: '0666'
     content: |
       ETCD_ENDPOINTS={{ETCD_ENDPOINTS}}
       CONTROLLER_ENDPOINT={{CONTROLLER_ENDPOINT}}

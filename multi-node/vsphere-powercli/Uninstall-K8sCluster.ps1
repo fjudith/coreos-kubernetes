@@ -1,14 +1,24 @@
 PARAM(
     [parameter(mandatory=$false)][String]$VMHost,
     [parameter(mandatory=$false)][String]$Cluster ='Cluster-Prod',
-    [parameter(mandatory=$false)][String]$ConfigurationPath = "${pwd}\conf",
+    [parameter(mandatory=$false)][String]$ConfigurationPath = "${pwd}\.vsphere\machines",
     
     [parameter(mandatory=$false)][Switch]$Force,
     [parameter(mandatory=$false)][Switch]$Whatif
 )
 BEGIN
 {
+    Set-StrictMode -Version 5
+
     $ErrorActionPreference = 'continue'
+
+    # Load Machine configuration from config
+    $Config = ([System.IO.FileInfo]"${pwd}\config.ps1").FullName
+    If (Test-Path $Config)
+    {   
+        # Get config file content, remove empty lines and invoke each line
+        Get-Content -Path $Config | ? {$_.trim() -ne "" } | Invoke-Expression
+    }
 
     Import-Module -Name 'VMware.VimAutomation.Core'
     
@@ -17,7 +27,7 @@ BEGIN
 }
 PROCESS
 {
-    Foreach($Item in $(Get-ChildItem -Path "${ConfigurationPath}\*\*"))
+    Foreach($Item in $(Get-ChildItem -Path "${ConfigurationPath}\*"))
     {
         If($Whatif)
         {
@@ -36,6 +46,6 @@ PROCESS
         }
         
         Remove-VM -DeletePermanently -VM $Object -Confirm:$Confirm
-        Remove-Item -Recurse -Confirm:$Confirm -Path "${ConfigurationPath}\*\$($Item.Name)"
+        Remove-Item -Recurse -Confirm:$Confirm -Path "${ConfigurationPath}\$($Item.Name)"
     }
 }

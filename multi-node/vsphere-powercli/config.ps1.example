@@ -39,8 +39,7 @@ $WorkerStartFrom = 200
 $WorkerGateway = '192.168.1.254'
 
 # Disk configuration
-$NodeDisks = 3
-$DiskSize = 5
+$HardDisk = 4GB,5GB,6GB
 
 # CoreOS Remote user
 $SSHUser = 'k8s-vsphere'

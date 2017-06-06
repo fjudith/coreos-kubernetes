@@ -496,6 +496,10 @@ Function Import-CoreOS
 Function Write-CoreOSCloudConfig
 {
     PARAM(
+        [parameter(mandatory=$false,ValueFromPipeline=$true,ValueFromPipelineByPropertyName=$true)]
+        [VMware.VimAutomation.ViCore.Types.V1.Inventory.VirtualMachine]
+        $VM,
+
         [parameter(mandatory=$false,position=0)]
         [string]
         $Name,  
@@ -518,7 +522,20 @@ Function Write-CoreOSCloudConfig
     )
     BEGIN
     {
-        
+        # Get virtual machine object
+        # https://blogs.vmware.com/PowerCLI/2016/04/powercli-best-practice-correct-use-strong-typing.html
+        If($VM -is [VMware.VimAutomation.ViCore.Types.V1.Inventory.VirtualMachine])
+        {
+            $Name = $VM.Name
+        }
+        Else
+        {
+            If($VMHost -and $Cluster){Throw "Processing VMhost and Cluster is not supported"}
+            ElseIf($VMHost){$VM = Get-VMHost -Name "${VMHost}" | Get-VM -Name "${Name}"}
+            ElseIf($Cluster){$VM = Get-Cluster -Name "${Cluster}" | Get-VM -Name "${Name}"}
+            Else{Throw "Missing vSphere hosting agurment:`"-VMHost`" or `"-Cluster`""}
+        }
+
         # Temporary VMX file to inject cloud-config data
         $vmxTemp = "$($([System.IO.FileInfo]$CloudConfigPath).DirectoryName)\$($Name).vmx"
 
@@ -526,20 +543,15 @@ Function Write-CoreOSCloudConfig
         $cc = Get-Content -Path "${CloudConfigPath}" -Raw
         $b = [System.Text.Encoding]::UTF8.GetBytes($cc)
         $EncodedText = [System.Convert]::ToBase64String($b)
-
-        # Get virtual machine object
-        If($Cluster)    {$vm = Get-Cluster -Name $Cluster | Get-VM -Name $Name}
-        ElseIf($VMHost) {$vm = Get-VMHost -Name $VMHost | Get-VM -Name $Name}
-        Else            {$vm = Get-VM -Name $Name}
     }
     PROCESS
     {
 
         # Power-Off the virtualmachine if powered-on.
-        If ($vm.PowerState -eq "PoweredOn"){ $vm | Stop-VM -Confirm:$False }
+        If ($VM.PowerState -eq "PoweredOn"){ $VM | Stop-VM -Confirm:$False }
 
         # VMX file download from vSphere infrastructure
-        $Datastore = $vm | Get-Datastore
+        $Datastore = $VM | Get-Datastore
         $vmxRemote = "$($Datastore.name):\$($Name)\$($Name).vmx"
 
         If (Get-PSDrive | Where-Object { $_.Name -eq $Datastore.Name})
@@ -571,26 +583,12 @@ Function Write-CoreOSCloudConfig
         Copy-DatastoreItem -Force -Item $vmxTemp -Destination $vmxRemote
 
         # Power-On virtaul machine and watch for VMware Tools status
-        $vm | Start-VM > $Null
-        $status = "toolsNotRunning"
-
-        while ($status -eq "toolsNotRunning")
-        {
-            $status = (Get-VM -name $Name | Get-View).Guest.ToolsStatus
-            
-            Write-Host -NoNewline -Object "${Name}: VMware Tools Status [" 
-            Write-Host -NoNewline -ForegroundColor 'yellow' -Object $Status
-            Write-Host -Object "]"
-
-            Start-Sleep -Seconds 10
-        }
+        $VM | Start-VM > $Null
+        
+        Wait-VMGuest -VM $VMObject -Sleep 10
     }
     END
     {
-        Write-Host -NoNewline -Object "${Name}: VMware Tools Status [" 
-        Write-Host -NoNewline -ForegroundColor 'green' -Object $Status
-        Write-Host -Object "]"
-
         Remove-PSDrive -Name $Datastore.Name > $Null
     }
 }
@@ -672,7 +670,7 @@ Function Get-K8sEtcdIP
     END
     {
         Write-Host -NoNewline -Object "Etcd IP Adresses ["
-        Write-Host -NoNewline -ForegroundColor 'green' -Object "${EtcdIPs}"
+        Write-Host -NoNewline -ForegroundColor 'green' -Object "${IpArray}"
         Write-Host -Object "]"
 
         # Return the array containing the etcd ip address list
@@ -747,7 +745,7 @@ Function Get-K8sEtcdEndpoint
         $ClusterArray = $ClusterArray -Join ','
 
         Write-Host -NoNewline -Object "Etcd endpoints ["
-        Write-Host -NoNewline -ForegroundColor 'green' -Object "${EtcdEndpoints}"
+        Write-Host -NoNewline -ForegroundColor 'green' -Object "${ClusterArray}"
         Write-Host -Object "]"
 
         # Return the array containing the etcd ip address list
@@ -787,10 +785,10 @@ Function Get-K8sControllerIP
     }
     END
     {
-        $IpArray += $ControllerCluser
+        $IpArray += $ControllerCluster
         
         Write-Host -NoNewline -Object "Controller IP Adresses ["
-        Write-Host -NoNewline -ForegroundColor 'green' -Object "${ControllerIPs}"
+        Write-Host -NoNewline -ForegroundColor 'green' -Object "${IpArray}"
         Write-Host -Object "]"
 
         # Return the array containing the controller ip address list
@@ -798,6 +796,41 @@ Function Get-K8sControllerIP
     }
 }
 
+Function Get-K8sWorkerIP
+{
+    PARAM(
+        [parameter(mandatory=$false)]
+        [string]
+        $Subnet,
+        
+        [parameter(mandatory=$false)]
+        [int]
+        $StartFrom = 50,
+
+        [parameter(mandatory=$false)]
+        [int]
+        $Count = 1
+    )
+    BEGIN
+    {
+        $IpArray = @()
+    }
+    PROCESS
+    {
+        For($i = 1 ; $i -le $Count; $i++){
+            $IpArray += New-K8sIpAddress -Subnet $Subnet -StartFrom $StartFrom -Count $i
+        }
+    }
+    END
+    {
+        Write-Host -NoNewline -Object "Worker IP Adresses ["
+        Write-Host -NoNewline -ForegroundColor 'green' -Object "${IpArray}"
+        Write-Host -Object "]"
+
+        # Return the array containing the etcd ip address list
+        Write-Output -InputObject $IpArray
+    }
+}
 
 Function New-K8sEtcdCluster
 {
@@ -839,6 +872,14 @@ Function New-K8sEtcdCluster
         $Cluster,
 
         [parameter(mandatory=$false)]
+        [int]
+        $numCpu = 1,
+
+        [parameter(mandatory=$false)]
+        [int]
+        $MemoryMB = 512,
+
+        [parameter(mandatory=$false)]
         [string]
         $DataStore = 'datastore1',
 
@@ -875,7 +916,7 @@ Function New-K8sEtcdCluster
             Write-Host -NoNewline -ForegroundColor 'cyan' -Object ($e +1)
             Write-Host -Object "]"
             
-            $ConfigPath = "${pwd}\conf\etcd\$Name\openstack\latest\user-data"
+            $ConfigPath = "${pwd}\.vsphere\machines\$Name\openstack\latest\user-data"
 
             New-Item -Force -ItemType 'Directory' -Path $(([System.IO.fileInfo]$ConfigPath).DirectoryName) > $Null
 
@@ -897,10 +938,10 @@ Function New-K8sEtcdCluster
             # Add DNS records to GuestInfo
             For( $d = 0; $d -le $DNS.Length -1 ; $d++)
             {
-                $GuestInfo += @{"guestinfo.dns.server.$($d +1)" = $DNS[$d]}
+                $GuestInfo += @{"guestinfo.dns.server.$($d)" = $DNS[$d]}
             }
 
-            # Provision, Configure and Start VM
+            # Provision VM
             If($VMHost -and $Cluster)
             {
                 Throw "Processing VMhost and Cluster is not supported"
@@ -908,17 +949,23 @@ Function New-K8sEtcdCluster
             ElseIf($VMHost)
             {
                 Import-CoreOS -Name "${Name}" -DataStore "${DataStore}" -VMHost "${VMHost}" -PortGroup "${PortGroup}" -DiskStorageFormat "${DiskstorageFormat}"
-                Write-CoreOSCloudConfig -Name "${Name}" -GuestInfo $GuestInfo -CloudConfigPath "${ConfigPath}" -VMHost "${VMHost}"
+
+                $VMObject = Get-VMHost -Name "${VMHost}"   | Get-VM -Name "${Name}"
             }
             ElseIf($Cluster)
             {
                 Import-CoreOS -Name "${Name}" -DataStore "${DataStore}" -Cluster "${Cluster}" -PortGroup "${PortGroup}" -DiskStorageFormat "${DiskstorageFormat}"
-                Write-CoreOSCloudConfig -Name "${Name}" -GuestInfo $GuestInfo -CloudConfigPath "${ConfigPath}" -Cluster "${Cluster}"               
+
+                $VMObject = Get-Cluster -Name "${Cluster}"   | Get-VM -Name "${Name}"
             }
             Else
             {
                 Throw "Missing vSphere hosting agurment:`"-VMHost`" or `"-Cluster`""
             }
+
+            # Configure and Start VM
+            Set-CoreOSVirtualHardware -VM $VMObject -numCpu $numCpu -MemoryMB $MemoryMB
+            Write-CoreOSCloudConfig -VM $VMObject -GuestInfo $GuestInfo -CloudConfigPath "${ConfigPath}"
         }
     }
 
@@ -965,6 +1012,18 @@ Function New-K8sControllerCluster
         $Cluster,
 
         [parameter(mandatory=$false)]
+        [int]
+        $numCpu = 1,
+
+        [parameter(mandatory=$false)]
+        [int]
+        $MemoryMB = 1024,
+
+        [parameter(mandatory=$false)]
+        [string[]]
+        $HardDisk = @(4GB, 5GB, 6GB),
+
+        [parameter(mandatory=$false)]
         [string]
         $DataStore = 'datastore1',
 
@@ -978,7 +1037,7 @@ Function New-K8sControllerCluster
 
         [parameter(mandatory=$false)]
         [string]
-        $CloudConfigFile = "${pwd}\Controller-cloud-config.yaml",
+        $CloudConfigFile = "${pwd}\controller-cloud-config.yaml",
         
         [parameter(mandatory=$false)]
         [PSCredential]
@@ -986,11 +1045,19 @@ Function New-K8sControllerCluster
 
         [parameter(mandatory=$false)]
         [string]
-        $InstallScript
+        $InstallScript,
+
+        [parameter(mandatory=$false)]
+        [string]
+        $EtcdEndpoints,
+
+        [parameter(mandatory=$false)]
+        [string]
+        $ControllerCluster
     )
     BEGIN
     {
-        $IpAddresses = New-K8sIpAddress -Subnet $Subnet -StartFrom $StartFrom -Count $Count
+        $IpAddresses = Get-K8sControllerIP -Subnet $Subnet -StartFrom $StartFrom -Count $Count -ControllerCluster $ControllerCluster
         
         Write-Host -NoNewline -Object "Deploying controller count ["
         Write-Host -NoNewline -ForegroundColor 'green' -Object "${Count}"
@@ -1008,7 +1075,7 @@ Function New-K8sControllerCluster
             Write-Host -Object "]"
 
             # Cloud Config
-            $ConfigPath = "${pwd}\conf\controller\$Name\openstack\latest\user-data"
+            $ConfigPath = "${pwd}\.vsphere\machines\$Name\openstack\latest\user-data"
             New-Item -Force -ItemType 'Directory' -Path $(([System.IO.fileInfo]$ConfigPath).DirectoryName) > $Null
             $Config = Get-Content -Path "${CloudConfigFile}"
             $Config = $Config -Replace '\{\{ETCD_ENDPOINTS\}\}',$EtcdEndpoints
@@ -1027,10 +1094,10 @@ Function New-K8sControllerCluster
             # Add DNS records to GuestInfo
             For( $d = 0; $d -le $DNS.Length -1 ; $d++)
             {
-                $GuestInfo += @{"guestinfo.dns.server.$($d +1)" = $DNS[$d]}
+                $GuestInfo += @{"guestinfo.dns.server.$($d)" = $DNS[$d]}
             }
 
-            # Provision, Configure and Start VM
+            # Provision VM
             If($VMHost -and $Cluster)
             {
                 Throw "Processing VMhost and Cluster is not supported"
@@ -1038,17 +1105,23 @@ Function New-K8sControllerCluster
             ElseIf($VMHost)
             {
                 Import-CoreOS -Name "${Name}" -DataStore "${DataStore}" -VMHost "${VMHost}" -PortGroup "${PortGroup}" -DiskStorageFormat "${DiskstorageFormat}"
-                Write-CoreOSCloudConfig -Name "${Name}" -GuestInfo $GuestInfo -CloudConfigPath "${ConfigPath}" -VMHost "${VMHost}"
+
+                $VMObject = Get-VMHost -Name "${VMHost}"   | Get-VM -Name "${Name}"
             }
             ElseIf($Cluster)
             {
                 Import-CoreOS -Name "${Name}" -DataStore "${DataStore}" -Cluster "${Cluster}" -PortGroup "${PortGroup}" -DiskStorageFormat "${DiskstorageFormat}"
-                Write-CoreOSCloudConfig -Name "${Name}" -GuestInfo $GuestInfo -CloudConfigPath "${ConfigPath}" -Cluster "${Cluster}"               
+
+                $VMObject = Get-Cluster -Name "${Cluster}"   | Get-VM -Name "${Name}"
             }
             Else
             {
                 Throw "Missing vSphere hosting agurment:`"-VMHost`" or `"-Cluster`""
             }
+
+            # Configure and Start VM
+            Set-CoreOSVirtualHardware -VM $VMObject -numCpu $numCpu -MemoryMB $MemoryMB -HardDisk $HardDisk
+            Write-CoreOSCloudConfig -VM $VMObject -GuestInfo $GuestInfo -CloudConfigPath "${ConfigPath}"
 
             Test-TcpConnection -ComputerName $IP -Port 22 -Loop
 
@@ -1069,24 +1142,9 @@ Function New-K8sControllerCluster
             # Remove-SSHSession -SessionId $SSHSessionID
             
             # Restart Virtual Machine
-            $VMObject = Get-VM -Name "${Name}"
-            Restart-VMGuest -VM $VMObject
+            Restart-VMGuest -VM $VMObject > $null
 
-            $Status = 'toolsNotRunning'
-
-            while ($Status -eq 'toolsNotRunning')
-            {
-                $status = (Get-VM -name "$($VMObject.Name)" | Get-View).Guest.ToolsStatus
-                
-                Write-Host -NoNewline -Object "$($VMObject.Name) (Restart): VMware Tools Status [" 
-                Write-Host -NoNewline -ForegroundColor 'yellow' -Object $Status
-                Write-Host -Object "]"
-
-                Start-Sleep -Seconds 10
-            }
-            Write-Host -NoNewline -Object "$($VMObject.Name) (Restart): VMware Tools Status [" 
-            Write-Host -NoNewline -ForegroundColor 'green' -Object $Status
-            Write-Host -Object "]"
+            Wait-VMGuest -VM $VMObject -Sleep 10 -Reboot
         }
     }
 }
@@ -1132,6 +1190,18 @@ Function New-K8sWorkerCluster
         $Cluster,
 
         [parameter(mandatory=$false)]
+        [int]
+        $numCpu = 1,
+
+        [parameter(mandatory=$false)]
+        [int]
+        $MemoryMB = 1024,
+
+        [parameter(mandatory=$false)]
+        [string[]]
+        $HardDisk = @(4GB, 5GB, 6GB),
+
+        [parameter(mandatory=$false)]
         [string]
         $DataStore = 'datastore1',
 
@@ -1155,9 +1225,13 @@ Function New-K8sWorkerCluster
         [string]
         $InstallScript,
 
-        [parameter(mandatory=$false)]
+        [parameter(mandatory=$true)]
         [string]
-        $EtcdEndpoints
+        $EtcdEndpoints,
+
+        [parameter(mandatory=$true)]
+        [string]
+        $ControllerEndpoint
     )
     BEGIN
     {
@@ -1177,11 +1251,10 @@ Function New-K8sWorkerCluster
             Write-Host -Object "]"
 
             # Cloud Config
-            $ConfigPath = "${pwd}\conf\worker\$Name\openstack\latest\user-data"
+            $ConfigPath = "${pwd}\.vsphere\machines\$Name\openstack\latest\user-data"
             New-Item -Force -ItemType 'Directory' -Path $(([System.IO.fileInfo]$ConfigPath).DirectoryName) > $Null
             $Config = Get-Content -Path "${CloudConfigFile}"
             $Config = $Config -Replace '\{\{ETCD_ENDPOINTS\}\}',$EtcdEndpoints
-            $ControllerEndpoint = $ControllerIPs | Select-Object -First 1 
             $Config = $Config -Replace '\{\{CONTROLLER_ENDPOINT\}\}',$ControllerEndpoint
             Set-Content -Path $ConfigPath -Value $Config
 
@@ -1197,10 +1270,10 @@ Function New-K8sWorkerCluster
             # Add DNS records to GuestInfo
             For( $d = 0; $d -le $DNS.Length -1 ; $d++)
             {
-                $GuestInfo += @{"guestinfo.dns.server.$($d +1)" = $DNS[$d]}
+                $GuestInfo += @{"guestinfo.dns.server.$($d)" = $DNS[$d]}
             }
 
-            # Provision, Configure and Start VM
+            # Provision VM
             If($VMHost -and $Cluster)
             {
                 Throw "Processing VMhost and Cluster is not supported"
@@ -1208,17 +1281,23 @@ Function New-K8sWorkerCluster
             ElseIf($VMHost)
             {
                 Import-CoreOS -Name "${Name}" -DataStore "${DataStore}" -VMHost "${VMHost}" -PortGroup "${PortGroup}" -DiskStorageFormat "${DiskstorageFormat}"
-                Write-CoreOSCloudConfig -Name "${Name}" -GuestInfo $GuestInfo -CloudConfigPath "${ConfigPath}" -VMHost "${VMHost}"
+
+                $VMObject = Get-VMHost -Name "${VMHost}"   | Get-VM -Name "${Name}"
             }
             ElseIf($Cluster)
             {
                 Import-CoreOS -Name "${Name}" -DataStore "${DataStore}" -Cluster "${Cluster}" -PortGroup "${PortGroup}" -DiskStorageFormat "${DiskstorageFormat}"
-                Write-CoreOSCloudConfig -Name "${Name}" -GuestInfo $GuestInfo -CloudConfigPath "${ConfigPath}" -Cluster "${Cluster}"               
+
+                $VMObject = Get-Cluster -Name "${Cluster}"   | Get-VM -Name "${Name}"
             }
             Else
             {
                 Throw "Missing vSphere hosting agurment:`"-VMHost`" or `"-Cluster`""
             }
+
+            # Configure and Start VM
+            Set-CoreOSVirtualHardware -VM $VMObject -numCpu $numCpu -MemoryMB $MemoryMB -HardDisk $HardDisk
+            Write-CoreOSCloudConfig -VM $VMObject -GuestInfo $GuestInfo -CloudConfigPath "${ConfigPath}"
 
             Test-TcpConnection -ComputerName $IP -Port 22 -Loop
 
@@ -1232,30 +1311,15 @@ Function New-K8sWorkerCluster
             Set-ScpFile -Force -LocalFile "${InstallScript}" -RemotePath '/tmp/' -ComputerName $IP -Credential $SSHCredential
             Invoke-SSHCommand -Index $SSHSessionID -Command 'cd /tmp/ && mv worker-install.sh vsphere-user-data'
             Invoke-SSHCommand -Index $SSHSessionID -Command 'sudo mkdir -p /var/lib/coreos-vsphere && sudo mv /tmp/vsphere-user-data /var/lib/coreos-vsphere/'
-            #Invoke-SSHCommand -Index $SSHSessionID -Command 'sudo systemctl enable docker'
+            # Invoke-SSHCommand -Index $SSHSessionID -Command 'sudo systemctl enable docker'
 
             # Close SSH Session
             # Remove-SSHSession -SessionId $SSHSessionID
             
             # Restart Virtual Machine
-            $VMObject = Get-VM -Name "${Name}"
-            Restart-VMGuest -VM $VMObject
+            Restart-VMGuest -VM $VMObject > $null
 
-            $Status = 'toolsNotRunning'
-
-            while ($Status -eq 'toolsNotRunning')
-            {
-                $status = (Get-VM -name "$($VMObject.Name)" | Get-View).Guest.ToolsStatus
-                
-                Write-Host -NoNewline -Object "$($VMObject.Name) (Restart): VMware Tools Status [" 
-                Write-Host -NoNewline -ForegroundColor 'yellow' -Object $Status
-                Write-Host -Object "]"
-
-                Start-Sleep -Seconds 10
-            }
-            Write-Host -NoNewline -Object "$($VMObject.Name) (Restart): VMware Tools Status [" 
-            Write-Host -NoNewline -ForegroundColor 'green' -Object $Status
-            Write-Host -Object "]"
+            Wait-VMGuest -VM $VMObject -Sleep 10 -Reboot
         }
     }
 }
@@ -1330,5 +1394,159 @@ Function Test-TcpConnection
                 }
             }
         }
+    }
+}
+
+Function Set-CoreOSVirtualHardware{
+    PARAM(
+        [parameter(mandatory=$false,ValueFromPipeline=$true,ValueFromPipelineByPropertyName=$true)]
+        [VMware.VimAutomation.ViCore.Types.V1.Inventory.VirtualMachine]
+        $VM,
+
+        [parameter(mandatory=$false)]
+        [string]
+        $VMHost,
+
+        [parameter(mandatory=$false)]
+        [string]
+        $Cluster,
+
+        [parameter(mandatory=$false)]
+        [string]
+        $Name,
+
+        [parameter(mandatory=$false)]
+        [int]
+        $numCpu,
+
+        [parameter(mandatory=$false)]
+        [int]
+        $MemoryMB,
+
+        [parameter(mandatory=$false)]
+        [string[]]
+        $HardDisk
+    )
+    BEGIN
+    {   
+        # https://blogs.vmware.com/PowerCLI/2016/04/powercli-best-practice-correct-use-strong-typing.html
+        If(-not $VM)
+        {
+            If($VMHost -and $Cluster){Throw "Processing VMhost and Cluster is not supported"}
+            ElseIf($VMHost){$VM = Get-VMHost -Name "${VMHost}" | Get-VM -Name "${Name}"}
+            ElseIf($Cluster){$VM = Get-Cluster -Name "${Cluster}" | Get-VM -Name "${Name}"}
+            Else{Throw "Missing vSphere hosting agurment:`"-VMHost`" or `"-Cluster`""}
+        }
+        Write-Host -NoNewline -Object "$($VM.Name): Setting up virtual hardware ["
+    }
+    PROCESS
+    {
+        $VM | Set-VM -numCpu "${numCpu}" -MemoryMB "${MemoryMB}" -Confirm:$false > $Null
+
+        If($HardDisk)
+        {
+            Foreach($Disk in $HardDisk)
+            {
+                $VM | New-HardDisk -CapacityKB $($Disk /1KB) -Disktype 'flat' -ThinProvisioned > $Null
+            }
+        }
+        Write-Host -ForegroundColor 'green' -NoNewline -Object "CPU:${numCpu}, Memory:${MemoryMB}, HardDisk:${HardDisk}"
+        Write-Host -Object "]"
+    }
+}
+
+Function Test-K8sInstall
+{
+    PARAM(
+        [paramerter(mandatory=$true)]
+        [string[]]
+        $EtcdComputerName,
+
+        [paramerter(mandatory=$true)]
+        [string[]]
+        $ControllerComputerName,
+
+        [paramerter(mandatory=$true)]
+        [string[]]
+        $WorkerComputerName
+    )
+    BEGIN
+    {
+        $ErrorActionPreference = 'Stop'
+    }
+    PROCESS
+    {
+        # Etcd
+        For($etcd = 0; $etcd -le $EtcdComputerName.Lenght -1 ; $etcd++){
+            Test-TcpConnection -Computername $ComputerName[$etcd] -Port 2379,2380
+        }
+
+        # Controller
+        # Ommits the last record as it contain the cluster IP
+        For($ctrl = 0; $ctrl -lt $ControllerComputerName.Lenght -1 ; $ctrl++){
+            Test-TcpConnection -Computername $ComputerName[$ctrl] -Port 8080,443
+        }
+
+        # Worker
+        For($work = 0; $work -le $ControllerComputerName.Lenght -1 ; $work++){
+            Test-TcpConnection -Computername $ComputerName[$work] -Port 8080,443
+        }
+    }
+}
+
+Function Wait-VMGuest{
+    PARAM(
+        [parameter(mandatory=$false,ValueFromPipeline=$true,ValueFromPipelineByPropertyName=$true)]
+        [VMware.VimAutomation.ViCore.Types.V1.Inventory.VirtualMachine]
+        $VM,
+
+        [parameter(mandatory=$false)]
+        [string]
+        $VMHost,
+
+        [parameter(mandatory=$false)]
+        [string]
+        $Cluster,
+
+        [parameter(mandatory=$false)]
+        [string]
+        $Name,
+
+        [parameter(mandatory=$false)]
+        [int]
+        $Sleep = 1,
+
+        [parameter(mandatory=$false)]
+        [switch]
+        $Reboot          
+    )
+    BEGIN
+    {
+        $Status = 'toolsNotRunning'
+        $Operation = 'Boot'
+
+        If($Reboot){ $Operation = 'Reboot'}
+        If(-not $VM -is [VMware.VimAutomation.ViCore.Types.V1.Inventory.VirtualMachine])
+        {
+            If($VMHost -and $Cluster){Throw "Processing VMhost and Cluster is not supported"}
+            ElseIf($VMHost){$VM = Get-VMHost -Name "${VMHost}" | Get-VM -Name "${Name}"}
+            ElseIf($Cluster){$VM = Get-Cluster -Name "${Cluster}" | Get-VM -Name "${Name}"}
+            Else{Throw "Missing vSphere hosting agurment:`"-VMHost`" or `"-Cluster`""}
+        }
+    }
+    PROCESS{
+        while ($Status -eq 'toolsNotRunning')
+        {
+            $Status = ($VM | Get-View).Guest.ToolsStatus
+
+            Start-Sleep -Seconds $Sleep
+                
+            Write-Host -NoNewline -Object "$($VM.Name) `(${Operation}`): VMware Tools Status [" 
+            Write-Host -NoNewline -ForegroundColor 'yellow' -Object $Status
+            Write-Host -Object "]"
+        }
+        Write-Host -NoNewline -Object "$($VM.Name) `(${Operation}`): VMware Tools Status [" 
+        Write-Host -NoNewline -ForegroundColor 'green' -Object $Status
+        Write-Host -Object "]"
     }
 }

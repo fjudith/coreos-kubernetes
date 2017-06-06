@@ -11,6 +11,7 @@ PARAM(
     [parameter(mandatory=$false)][String]$EtcdNamePrefix = 'etcd',
     [parameter(mandatory=$false)][Int]$EtcdCount = 1,
     [parameter(mandatory=$false)][Int]$EtcdVMMemory = 512,
+    [parameter(mandatory=$false)][Int]$EtcdVMCpu = 1,
     [parameter(mandatory=$false)][String]$EtcdSubnet = '192.168.251.0',
     [parameter(mandatory=$false)][Int]$EtcdCIDR = 24,
     [parameter(mandatory=$false)][Int]$EtcdStartFrom = 50,
@@ -20,6 +21,7 @@ PARAM(
     [parameter(mandatory=$false)][String]$ControllerNamePrefix = 'ctrl',
     [parameter(mandatory=$false)][Int]$ControllerCount = 1,
     [parameter(mandatory=$false)][Int]$ControllerVMMemory = 1024,
+    [parameter(mandatory=$false)][Int]$ControllerVMCpu = 1,
     [parameter(mandatory=$false)][String]$ControllerSubnet = '192.168.251.0',
     [parameter(mandatory=$false)][Int]$ControllerCIDR = 24,
     [parameter(mandatory=$false)][Int]$ControllerStartFrom = 100,
@@ -35,9 +37,12 @@ PARAM(
     [parameter(mandatory=$false)][Int]$WorkerStartFrom = 200,
     [parameter(mandatory=$false)][String]$WorkerGateway = '192.168.251.254',
 
-    # Disk configuration
-    [parameter(mandatory=$false)][Int]$NodeDisks = 3,
-    [parameter(mandatory=$false)][Int]$DiskSize = 5,
+    # Disk configuration in GB
+    [parameter(mandatory=$false)][string[]]$HardDisk = @(
+        4GB ;
+        5GB ;
+        6GB
+    ),
 
     # CoreOS Remote user
     [parameter(mandatory=$false)][String]$SSHUser = 'k8s-vsphere',
@@ -57,11 +62,6 @@ BEGIN{
 
     $ErrorActionPreference = 'stop'
 
-    # Import Powershell Module
-    Import-Module -Name 'VMware.VimAutomation.Core'
-    Import-Module -Force -Name "${pwd}\Modules\K8s-vSphere"
-    Import-module -Force -Name "${pwd}\Modules\Posh-SSH"
-
     # Load Machine configuration from config
     $Config = ([System.IO.FileInfo]"${pwd}\config.ps1").FullName
     If (Test-Path $Config)
@@ -75,6 +75,11 @@ BEGIN{
         Write-Warning -Message 'Workers should have at least 1024 MB of Memory'
     }
 
+    # Import Powershell Module
+    Import-Module -Name 'VMware.VimAutomation.Core'
+    Import-Module -Force -Name "${pwd}\Modules\K8s-vSphere"
+    Import-module -Force -Name "${pwd}\Modules\Posh-SSH"
+    
     # Create SSH Credential Object
     $SecureHostPassword = ConvertTo-SecureString "${SSHPassword}" -AsPlainText -Force
     $SSHCredential = New-Object System.Management.Automation.PSCredential ("${SSHUser}", $SecureHostPassword)
@@ -96,11 +101,14 @@ BEGIN{
     # Building a single string for Etcd Endpoints Node list containing Etcd URLs as per given etcd count
     $EtcdEndpoints = Get-K8sEtcdEndpoint -IpAddress $EtcdIPs -Protocol 'http' -Port '2379'
 
-
     # Building array of Controller IP addresses as per given controller count
     # Adding Controller Cluster IP address at the end of the list
     $ControllerIPs = Get-K8sControllerIP -Subnet $ControllerSubnet -StartFrom $ControllerStartFrom -Count $ControllerCount -ControllerCluster $ControllerClusterIP
 
+    $ControllerEndpoint = "https://$($ControllerIPs | Select-Object -First 1)"
+
+    # Building array of Worker IP addresses as per given worker count
+    $WorkerIPs = Get-K8sWorkerIP -Subnet $WorkerSubnet -StartFrom $WorkerStartFrom -Count $WorkerCount
 }  
 PROCESS{
     
@@ -127,7 +135,7 @@ PROCESS{
     ##################################################
     if($VMHost)
     {
-        New-K8sEtcdCluster -VMhost $VMHost `
+        New-K8sEtcdCluster -VMhost $VMHost -MemoryMB $EtcdVMMemory -numCPU $EtcdVMCpu `
         -Subnet $EtcdSubnet -CIDR $EtcdCIDR -Gateway $EtcdGateway -DNS $DnsServer `
         -StartFrom $EtcdStartFrom -Count $EtcdCount -NamePrefix $EtcdNamePrefix `
         -DataStore $Datastore -PortGroup $PortGroup -DiskstorageFormat $DiskStorageFormat `
@@ -135,7 +143,7 @@ PROCESS{
     }
     ElseIf($Cluster)
     {
-        New-K8sEtcdCluster -Cluster $Cluster `
+        New-K8sEtcdCluster -Cluster $Cluster -MemoryMB $EtcdVMMemory -numCPU $EtcdVMCpu `
         -Subnet $EtcdSubnet -CIDR $EtcdCIDR -Gateway $EtcdGateway -DNS $DnsServer `
         -StartFrom $EtcdStartFrom -Count $EtcdCount -NamePrefix $EtcdNamePrefix `
         -DataStore $Datastore -PortGroup $PortGroup -DiskstorageFormat $DiskStorageFormat `
@@ -147,20 +155,22 @@ PROCESS{
 
     if($VMHost)
     {
-        New-K8sControllerCluster -VMhost $VMHost `
+        New-K8sControllerCluster -VMhost $VMHost -MemoryMB $ControllerVMMemory -numCPU $ControllerVMCpu -HardDisk $HardDisk `
         -Subnet $ControllerSubnet -CIDR $ControllerCIDR -Gateway $ControllerGateway -DNS $DnsServer `
         -StartFrom $ControllerStartFrom -Count $ControllerCount -NamePrefix $ControllerNamePrefix `
         -DataStore $Datastore -PortGroup $PortGroup -DiskstorageFormat $DiskStorageFormat `
         -CloudConfigFile $ControllerCloudConfigFile -InstallScript $ControllerCloudConfigPath `
+        -EtcdEndpoints $EtcdEndpoints -ControllerCluster $ControllerClusterIP `
         -SSHCredential $SSHCredential
     }
     ElseIf($Cluster)
     {
-        New-K8sControllerCluster -Cluster $Cluster `
+        New-K8sControllerCluster -Cluster $Cluster -MemoryMB $ControllerVMMemory -numCPU $ControllerVMCpu -HardDisk $HardDisk `
         -Subnet $ControllerSubnet -CIDR $ControllerCIDR -Gateway $ControllerGateway -DNS $DnsServer `
         -StartFrom $ControllerStartFrom -Count $ControllerCount -NamePrefix $ControllerNamePrefix `
         -DataStore $Datastore -PortGroup $PortGroup -DiskstorageFormat $DiskStorageFormat `
         -CloudConfigFile $ControllerCloudConfigFile -InstallScript $ControllerCloudConfigPath `
+        -EtcdEndpoints $EtcdEndpoints -ControllerCluster $ControllerClusterIP `
         -SSHCredential $SSHCredential
     }
 
@@ -168,22 +178,22 @@ PROCESS{
     ##################################################
     if($VMHost)
     {
-        New-K8sWorkerCluster -VMhost $VMHost `
+        New-K8sWorkerCluster -VMhost $VMHost -MemoryMB $WorkerVMMemory -numCPU $WorkerVMCpu -HardDisk $HardDisk `
         -Subnet $WorkerSubnet -CIDR $WorkerCIDR -Gateway $WorkerGateway -DNS $DnsServer `
         -StartFrom $WorkerStartFrom -Count $WorkerCount -NamePrefix $WorkerNamePrefix `
         -DataStore $Datastore -PortGroup $PortGroup -DiskstorageFormat $DiskStorageFormat `
         -CloudConfigFile $WorkerCloudConfigFile -InstallScript $WorkerCloudConfigPath `
-        -EtcdEndpoints $EtcdEndpoints `
+        -EtcdEndpoints $EtcdEndpoints -ControllerEndpoint $ControllerEndpoint `
         -SSHCredential $SSHCredential
     }
     ElseIf($Cluster)
     {
-        New-K8sWorkerCluster -Cluster $Cluster `
+        New-K8sWorkerCluster -Cluster $Cluster -MemoryMB $WorkerVMMemory -numCPU $WorkerVMCpu -HardDisk $HardDisk `
         -Subnet $WorkerSubnet -CIDR $WorkerCIDR -Gateway $WorkerGateway -DNS $DnsServer `
         -StartFrom $WorkerStartFrom -Count $WorkerCount -NamePrefix $WorkerNamePrefix `
         -DataStore $Datastore -PortGroup $PortGroup -DiskstorageFormat $DiskStorageFormat `
         -CloudConfigFile $WorkerCloudConfigFile -InstallScript $WorkerCloudConfigPath `
-        -EtcdEndpoints $EtcdEndpoints `
+        -EtcdEndpoints $EtcdEndpoints -ControllerEndpoint $ControllerEndpoint `
         -SSHCredential $SSHCredential
     }
 }

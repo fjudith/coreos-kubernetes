@@ -1,5 +1,5 @@
 .ova
 ssl/
-conf/
+.vsphere/
 kubeconfig
 config.ps1
