@@ -31,13 +31,13 @@ coreos:
 write_files:
   - path: /etc/environment
     owner: root
-    permissions: '0666'
+    permissions: '0644'
     content: |
       COREOS_PUBLIC_IPV4=$private_ipv4
       COREOS_PRIVATE_IPV4=$private_ipv4
   - path: /run/coreos-kubernetes/options.env
     owner: root
-    permissions: '0666'
+    permissions: '0644'
     content: |
       ETCD_ENDPOINTS={{ETCD_ENDPOINTS}}
       CONTROLLER_ENDPOINT={{CONTROLLER_ENDPOINT}}
