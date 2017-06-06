@@ -17,8 +17,7 @@ $worker_vm_memory = 2048
 $worker_vm_cpu = 1
 $etcd_count = 1
 $etcd_vm_memory = 512
-$node_disks = 3
-$disk_size = 5
+$node_disk_sizes = [4, 5, 6] # size in GB of each disk
 
 CONFIG = File.expand_path("config.rb")
 if File.exist?(CONFIG)
@@ -170,7 +169,7 @@ Vagrant.configure("2") do |config|
       controllerIP = controllerIP(i)
       controller.vm.network :private_network, ip: controllerIP
 
-      attach_volumes(controller, $node_disks, $disk_size)
+      attach_volumes(controller, $node_disk_sizes)
 
       # Each controller gets the same cert
       provisionMachineSSL(controller,"apiserver","kube-apiserver-#{controllerIP}",controllerIPs)
@@ -211,7 +210,7 @@ Vagrant.configure("2") do |config|
       workerIP = workerIP(i)
       worker.vm.network :private_network, ip: workerIP
 
-      attach_volumes(worker, $node_disks, $disk_size)
+      attach_volumes(worker, $node_disk_sizes)
 
       provisionMachineSSL(worker,"worker","kube-worker-#{workerIP}",[workerIP])
 
