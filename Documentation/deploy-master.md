@@ -455,7 +455,7 @@ spec:
         # container programs network policy and routes on each
         # host.
         - name: calico-node
-          image: quay.io/calico/node:v0.23.0
+          image: quay.io/calico/node:v1.2.0
           env:
             # The location of the Calico etcd cluster.
             - name: ETCD_ENDPOINTS
@@ -471,6 +471,8 @@ spec:
               value: "true"
             - name: NO_DEFAULT_POOLS
               value: "true"
+            - name: IP_AUTODETECTION_METHOD
+              value: "can-reach=172.17.4.99"
           securityContext:
             privileged: true
           volumeMounts:

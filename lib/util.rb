@@ -40,15 +40,17 @@ class VagrantPlugins::ProviderVirtualBox::Action::SetName
 end
 
 # Add persistent storage volumes
-def attach_volumes(node, num_volumes, volume_size)
+def attach_volumes(node, disk_sizes)
   if $provider == :virtualbox
     node.vm.provider :virtualbox do |v, override|
-      (1..num_volumes).each do |disk|
-        diskname = File.join(File.dirname(File.expand_path(__FILE__)), ".virtualbox", "#{node.vm.hostname}-#{disk}.vdi")
+      disk_num = 0
+      disk_sizes.each do |disk_size|
+        disk_num += 1
+        diskname = File.join(File.dirname(File.expand_path(__FILE__)), ".virtualbox", "#{node.vm.hostname}-#{disk_num}.vdi")
         unless File.exist?(diskname)
-          v.customize ['createhd', '--filename', diskname, '--size', volume_size * 1024]
+          v.customize ['createhd', '--filename', diskname, '--size', disk_size * 1024]
         end
-        v.customize ['storageattach', :id, '--storagectl', 'SATA Controller', '--port', disk, '--device', 0, '--type', 'hdd', '--medium', diskname]
+        v.customize ['storageattach', :id, '--storagectl', 'SATA Controller', '--port', disk_num, '--device', 0, '--type', 'hdd', '--medium', diskname]
       end
     end
   end
@@ -62,15 +64,17 @@ def attach_volumes(node, num_volumes, volume_size)
           Dir.mkdir dir
         end
 
-        (1..num_volumes).each do |disk|
-          diskname = File.join(dir, "#{node.vm.hostname}-#{disk}.vmdk")
+        disk_num = 0
+        disk_sizes.each do |disk_size|
+          disk_num += 1
+          diskname = File.join(dir, "#{node.vm.hostname}-#{disk_num}.vmdk")
           unless File.exist?(diskname)
-            `#{vdiskmanager} -c -s #{volume_size}GB -a lsilogic -t 1 #{diskname}`
+            `#{vdiskmanager} -c -s #{disk_size}GB -a lsilogic -t 1 #{diskname}`
           end
 
-          v.vmx["scsi0:#{disk}.filename"] = diskname
-          v.vmx["scsi0:#{disk}.present"] = 'TRUE'
-          v.vmx["scsi0:#{disk}.redo"] = ''
+          v.vmx["scsi0:#{disk_num}.filename"] = diskname
+          v.vmx["scsi0:#{disk_num}.present"] = 'TRUE'
+          v.vmx["scsi0:#{disk_num}.redo"] = ''
         end
       end
     end
@@ -78,8 +82,8 @@ def attach_volumes(node, num_volumes, volume_size)
 
   if $provider == :parallels
     node.vm.provider :parallels do |v, override|
-      (1..num_volumes).each do |disk|
-        v.customize ['set', :id, '--device-add', 'hdd', '--size', volume_size * 1024]
+      disk_sizes.each do |disk_size|
+        v.customize ['set', :id, '--device-add', 'hdd', '--size', disk_size * 1024]
       end
     end
   end
