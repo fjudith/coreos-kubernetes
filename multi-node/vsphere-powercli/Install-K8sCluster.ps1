@@ -55,7 +55,12 @@ PARAM(
     ),
 
     # Controller cluster IP
-    [parameter(mandatory=$false)][String]$ControllerClusterIP = '10.3.0.1'
+    [parameter(mandatory=$false)][String]$ControllerClusterIP = '10.3.0.1',
+
+    # Controller Endpoint 
+    # Typically load balancer/reverse-proxy without ssl offloading or DNS host record(s)
+    # e.g https://k8s.example.com
+    [parameter(mandatory=$false)][String]$ControllerEndPoint
 )
 BEGIN{
     Set-StrictMode -Version 5
@@ -105,7 +110,11 @@ BEGIN{
     # Adding Controller Cluster IP address at the end of the list
     $ControllerIPs = Get-K8sControllerIP -Subnet $ControllerSubnet -StartFrom $ControllerStartFrom -Count $ControllerCount -ControllerCluster $ControllerClusterIP
 
-    $ControllerEndpoint = "https://$($ControllerIPs | Select-Object -First 1)"
+    # Automatically select fisrt controller as worker endpoint 
+    # If no controller endpoint provided in argument
+    If(-not $ControllerEndpoint){
+        $ControllerEndpoint = "https://$($ControllerIPs | Select-Object -First 1)"
+    }
 
     # Building array of Worker IP addresses as per given worker count
     $WorkerIPs = Get-K8sWorkerIP -Subnet $WorkerSubnet -StartFrom $WorkerStartFrom -Count $WorkerCount

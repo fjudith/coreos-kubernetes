@@ -12,8 +12,8 @@ coreos:
   update:
     reboot-strategy: "off"
   units:
-    #- name: docker.service
-    #  command: start
+    - name: docker.service
+      enable: true
     - name: coreos-cloudinit-vsphere-mkdir.service
       command: start
       runtime: yes

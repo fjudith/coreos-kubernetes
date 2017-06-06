@@ -5,7 +5,7 @@ This guide walks a deployer though lauching a multi-node Kubernetes cluster usin
 # RoadMap
 
 * [x] Relies on existing Kubernetes install scripts.
-* [x] Fuction to update virtual hardware 
+* [x] Function to update virtual hardware configuration
 * [x] Option to add additionnal disk
 * [x] Test Vmware Tools running state instead of start-sleep
 * [x] Test SSH port availability instead of start-sleep
@@ -80,9 +80,14 @@ Machine type   | Qty | Hostname prefix | CPU | Memory | Subnet      | Subnet CID
 
 # Troubleshooting
 
+## VMware Guestinfo Interface 
 Open an an SSH session to the host then run the following commands to check the GuestInfo properties processed by Clound-Init.
 
 ```bash
 /usr/share/oem/bin/vmtoolsd --cmd "info-get guestinfo.coreos.config.data"
 /usr/share/oem/bin/vmtoolsd --cmd "info-get guestinfo.coreos.config.data.encoding"
 ```
+
+## Cloud-Init
+
+systemctl status $(systemctl list-units | egrep "^coreos\-cloudinit\-.*\.service" | awk '{print $1}')
