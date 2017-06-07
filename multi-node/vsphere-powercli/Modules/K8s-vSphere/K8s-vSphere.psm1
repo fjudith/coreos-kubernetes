@@ -303,7 +303,11 @@ General notes
         [parameter(mandatory=$true)]
         [String[]]
         $IpAddresses,
-        
+
+        [parameter(mandatory=$false)]
+        [String[]]
+        $SubjectAlternativeName,
+
         [parameter(mandatory=$true)]
         [String]
         $Computername,
@@ -321,6 +325,8 @@ General notes
         $ZipFile = "${pwd}\ssl\${CommonName}.zip"
         $IPString = @()
         For($i = 0 ; $i -lt $IpAddresses.Length; $i++){$IPString += "IP.$($i +1) = $($IpAddresses[$i])"}
+
+        For($i = 0 ; $i -lt $SubjectAlternativeName.Length; $i++){$IPString += "DNS.$($i +10) = $($($SubjectAlternativeName[$i]).Replace('https://',''))" }
     }
     PROCESS
     {
@@ -1053,7 +1059,11 @@ Function New-K8sControllerCluster
 
         [parameter(mandatory=$false)]
         [string]
-        $ControllerCluster
+        $ControllerCluster,
+
+        [parameter(mandatory=$false)]
+        [string]
+        $ControllerEndpoint
     )
     BEGIN
     {
@@ -1130,7 +1140,7 @@ Function New-K8sControllerCluster
 
             # Generate and copy SSL asset
             Send-SSHMachineSSL -CertificateBaseName 'apiserver' -CommonName "kube-apiserver-${IP}" -IpAddresses $IpAddresses `
-            -Computername $IP -Credential $SSHCredential  -SSHSession $SSHSessionID
+            -SubjectAlternativeName $ControllerEndpoint -Computername $IP -Credential $SSHCredential  -SSHSession $SSHSessionID
                     
             # Copy kubernetes worker configuration asset
             Set-ScpFile -Force -LocalFile "${InstallScript}" -RemotePath '/tmp/' -ComputerName $IP -Credential $SSHCredential

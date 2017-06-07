@@ -169,7 +169,7 @@ PROCESS{
         -StartFrom $ControllerStartFrom -Count $ControllerCount -NamePrefix $ControllerNamePrefix `
         -DataStore $Datastore -PortGroup $PortGroup -DiskstorageFormat $DiskStorageFormat `
         -CloudConfigFile $ControllerCloudConfigFile -InstallScript $ControllerCloudConfigPath `
-        -EtcdEndpoints $EtcdEndpoints -ControllerCluster $ControllerClusterIP `
+        -EtcdEndpoints $EtcdEndpoints -ControllerCluster $ControllerClusterIP -ControllerEndpoint $ControllerEndpoint `
         -SSHCredential $SSHCredential
     }
     ElseIf($Cluster)
@@ -179,7 +179,7 @@ PROCESS{
         -StartFrom $ControllerStartFrom -Count $ControllerCount -NamePrefix $ControllerNamePrefix `
         -DataStore $Datastore -PortGroup $PortGroup -DiskstorageFormat $DiskStorageFormat `
         -CloudConfigFile $ControllerCloudConfigFile -InstallScript $ControllerCloudConfigPath `
-        -EtcdEndpoints $EtcdEndpoints -ControllerCluster $ControllerClusterIP `
+        -EtcdEndpoints $EtcdEndpoints -ControllerCluster $ControllerClusterIP -ControllerEndpoint $ControllerEndpoint `
         -SSHCredential $SSHCredential
     }
 
