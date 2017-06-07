@@ -70,7 +70,7 @@ function init_templates {
         mkdir -p $(dirname $TEMPLATE)
         cat << EOF > $TEMPLATE
 [Service]
-Environment=PATH=/opt/bin/:/usr/bin/:/usr/sbin:$PATH
+Environment=PATH=/opt/bin/:/usr/bin/:/usr/sbin:${PATH}
 Environment=KUBELET_IMAGE_TAG=${K8S_VER}
 Environment=KUBELET_IMAGE_URL=${HYPERKUBE_IMAGE_REPO}
 Environment="RKT_RUN_ARGS=--uuid-file-save=${uuid_file} \
