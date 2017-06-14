@@ -108,32 +108,52 @@ cd c:\python27\scripts
 
 export PATH=$PATH:/c/Python27/Scripts
 
+## Disk format
+Open an SSH session to the kubernetes node
+
+```
+sudo umount -f /home/core/data/ceph/osd
+# Create partition
+# sudo parted -s /dev/sdb mklabel gpt mkpart primary 0% 33% mkpart primary 34% 66% mkpart primary 67% 100%
+sudo parted -s /dev/sdc mklabel gpt mkpart primary xfs 0% 100%
+
+# Format partition
+sudo mkfs.xfs /dev/sdc -f
+
+# Check partition
+sudo blkid -o value -s TYPE /dev/sdc
+
+# Mount partion
+sudo mkdir -p /home/core/data/ceph/osd
+sudo mount /dev/sdc /home/core/data/ceph/osd
+```
 
 ## Install daemon set
 cd ~/git/ceph-docker/examples/kubernetes-coreos
 pushd ~/git/coreos-kubernetes/multi-node/vsphere-powercli/ && . ./init-kubectl.sh && popd
-
 kubectl create namespace ceph
 kubectl create -f install-ds.yaml
 
 ## deploy ceph
 cd ~/git/ceph-docker/examples/kubernetes
-export osd_public_network=10.2.0.0/16
+export osd_public_network=10.2.0.0/16 
 export osd_cluster_network=10.2.0.0/16
+export osd_pool_default_pg_num = 32
+export osd_pool_default_pgp_num = 32
 
 ## Tagging
 
-# kubectl label node 192.168.251.201 node-type=storage
-# kubectl label node 192.168.251.202 node-type=storage
-# kubectl label node 192.168.251.203 node-type=storage
-kubectl label node 192.168.251.204 node-type=storage
-kubectl label node 192.168.251.205 node-type=storage
-kubectl label node 192.168.251.206 node-type=storage
+kubectl label node 192.168.251.201 node-type=storage
+kubectl label node 192.168.251.202 node-type=storage
+kubectl label node 192.168.251.203 node-type=storage
+#kubectl label node 192.168.251.204 node-type=storage
+#kubectl label node 192.168.251.205 node-type=storage
+#kubectl label node 192.168.251.206 node-type=storage
 
 ### Password
 cd generator
 # ./generate_secrets.sh all `./generate_secrets.sh fsid`
-./generate_secrets.sh all `./generate_secrets.sh fsid` osd_public_network=10.2.0.0/16 osd_cluster_network=10.2.0.0/16
+./generate_secrets.sh all `./generate_secrets.sh fsid` osd_public_network=10.2.0.0/16 osd_cluster_network=10.2.0.0/16 global_osd_pool_default_pg_num=32 global_osd_pool_default_pgp_num=32
 
 kubectl create namespace ceph
 
@@ -145,6 +165,9 @@ kubectl create secret generic ceph-client-key --from-file=ceph-client-key --name
 
 cd ..
 
+
+kubectl create -f https://github.com/ReSearchITEng/kubeadm-playbook/raw/master/allow-all-all-rbac.yml
+
 kubectl create \
 -f ceph-mds-v1-dp.yaml \
 -f ceph-mon-v1-svc.yaml \
@@ -152,10 +175,3 @@ kubectl create \
 -f ceph-mon-check-v1-dp.yaml \
 -f ceph-osd-v1-ds.yaml \
 --namespace=ceph
-
-## Lol
-
-sudo echo "
-nameserver 10.3.0.10
-search default.svc.cluster.local svc.cluster.local cluster.local
-" >> /run/systemd/resolve/resolv.conf

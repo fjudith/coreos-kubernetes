@@ -1098,7 +1098,8 @@ Function New-K8sControllerCluster
                 'guestinfo.interface.0.role' = 'private';
                 'guestinfo.interface.0.ip.0.address' = "${IP}/${CIDR}";
                 'guestinfo.interface.0.route.0.gateway' = "${Gateway}";
-                'guestinfo.interface.0.route.0.destination' = '0.0.0.0/0'
+                'guestinfo.interface.0.route.0.destination' = '0.0.0.0/0';
+                'guestinfo.dns.domain.0' = 'svc.cluster.local'
             }
             
             # Add DNS records to GuestInfo
@@ -1146,7 +1147,7 @@ Function New-K8sControllerCluster
             Set-ScpFile -Force -LocalFile "${InstallScript}" -RemotePath '/tmp/' -ComputerName $IP -Credential $SSHCredential
             Invoke-SSHCommand -Index $SSHSessionID -Command 'cd /tmp/ && mv controller-install.sh vsphere-user-data'
             Invoke-SSHCommand -Index $SSHSessionID -Command 'sudo mkdir -p /var/lib/coreos-vsphere && sudo mv /tmp/vsphere-user-data /var/lib/coreos-vsphere/'
-            #Invoke-SSHCommand -Index $SSHSessionID -Command 'sudo systemctl enable docker'
+
 
             # Close SSH Session
             # Remove-SSHSession -SessionId $SSHSessionID
@@ -1275,7 +1276,8 @@ Function New-K8sWorkerCluster
                 'guestinfo.interface.0.role' = 'private';
                 'guestinfo.interface.0.ip.0.address' = "${IP}/${CIDR}";
                 'guestinfo.interface.0.route.0.gateway' = "${Gateway}";
-                'guestinfo.interface.0.route.0.destination' = '0.0.0.0/0'
+                'guestinfo.interface.0.route.0.destination' = '0.0.0.0/0';
+                'guestinfo.dns.domain.0' = 'svc.cluster.local'
             }
             # Add DNS records to GuestInfo
             For( $d = 0; $d -le $DNS.Length -1 ; $d++)
@@ -1451,6 +1453,8 @@ Function Set-CoreOSVirtualHardware{
     }
     PROCESS
     {
+        ($VM | Get-HardDisk)[0] | Set-HardDisk -CapacityGB 16 -Confirm:$false  > $Null
+
         $VM | Set-VM -numCpu "${numCpu}" -MemoryMB "${MemoryMB}" -Confirm:$false > $Null
 
         If($HardDisk)
@@ -1462,6 +1466,8 @@ Function Set-CoreOSVirtualHardware{
         }
         Write-Host -ForegroundColor 'green' -NoNewline -Object "CPU:${numCpu}, Memory:${MemoryMB}, HardDisk:${HardDisk}"
         Write-Host -Object "]"
+
+        Start-Sleep -Seconds 10
     }
 }
 
