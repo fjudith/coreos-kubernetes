@@ -111,7 +111,7 @@ export PATH=$PATH:/c/Python27/Scripts
 ## Disk format
 Open an SSH session to the kubernetes node
 
-```
+```bash
 sudo umount -f /home/core/data/ceph/osd
 # Create partition
 # sudo parted -s /dev/sdb mklabel gpt mkpart primary 0% 33% mkpart primary 34% 66% mkpart primary 67% 100%
@@ -128,6 +128,7 @@ sudo mkdir -p /home/core/data/ceph/osd
 sudo mount /dev/sdc /home/core/data/ceph/osd
 ```
 
+```shell
 ## Install daemon set
 cd ~/git/ceph-docker/examples/kubernetes-coreos
 pushd ~/git/coreos-kubernetes/multi-node/vsphere-powercli/ && . ./init-kubectl.sh && popd
@@ -175,3 +176,4 @@ kubectl create \
 -f ceph-mon-check-v1-dp.yaml \
 -f ceph-osd-v1-ds.yaml \
 --namespace=ceph
+```

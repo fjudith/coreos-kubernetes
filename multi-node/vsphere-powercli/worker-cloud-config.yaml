@@ -37,6 +37,11 @@ write_files:
     content: |
       [Service]
       LimitNOFILE=4096
+  - path: /etc/sysctl.d/max_map_count.conf
+    owner: root
+    permissions: '0644'
+    content: |
+      vm.max_map_count = 262144
   - path: /etc/environment
     owner: root
     permissions: '0644'
