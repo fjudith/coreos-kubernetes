@@ -12,8 +12,10 @@ Vagrant.require_version ">= 1.6.0"
 $update_channel = "beta"
 $controller_count = 1
 $controller_vm_memory = 2048
+$controller_vm_vcpus = 1
 $worker_count = 1
 $worker_vm_memory = 2048
+$worker_vm_vcpus = 1
 $etcd_count = 1
 $etcd_vm_memory = 512
 $node_disk_sizes = [4, 5, 6] # size in GB of each disk
@@ -108,6 +110,10 @@ Vagrant.configure("2") do |config|
     vb.gui = false
   end
 
+   config.vm.provider :parallels do |prl|
+     prl.cpus = 1
+   end
+
   (1..$etcd_count).each do |i|
     config.vm.define vm_name = "e%d" % i do |etcd|
 
@@ -154,15 +160,18 @@ Vagrant.configure("2") do |config|
       ["vmware_fusion", "vmware_workstation"].each do |vmware|
         controller.vm.provider vmware do |v|
           v.vmx['memsize'] = $controller_vm_memory
+          v.vmx['numvcpus'] = $controller_vm_vcpus
         end
       end
 
       controller.vm.provider :virtualbox do |vb|
         vb.memory = $controller_vm_memory
+        vb.cpus = $controller_vm_vcpus
       end
 
-      controller.vm.provider :parallels do |vb|
-        vb.memory = $controller_vm_memory
+      controller.vm.provider :parallels do |prl|
+        prl.memory = $controller_vm_memory
+        prl.cpus = $controller_vm_vcpus
       end
 
       controllerIP = controllerIP(i)
@@ -193,15 +202,18 @@ Vagrant.configure("2") do |config|
       ["vmware_fusion", "vmware_workstation"].each do |vmware|
         worker.vm.provider vmware do |v|
           v.vmx['memsize'] = $worker_vm_memory
+          v.vmx['numvcpus'] = $worker_vm_vcpus
         end
       end
 
       worker.vm.provider :virtualbox do |vb|
         vb.memory = $worker_vm_memory
+        vb.cpus = $worker_vm_vcpus
       end
 
-      worker.vm.provider :parallels do |vb|
-        vb.memory = $worker_vm_memory
+      worker.vm.provider :parallels do |prl|
+        prl.memory = $worker_vm_memory
+        prl.cpus = $worker_vm_vcpus
       end
 
       workerIP = workerIP(i)
