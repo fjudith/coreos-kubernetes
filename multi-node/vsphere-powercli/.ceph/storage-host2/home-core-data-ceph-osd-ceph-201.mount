@@ -1,0 +1,12 @@
+[Unit]
+Before=kubelet.service
+After=format-home-core-data-ceph-osd.service
+Requires=format-home-core-data-ceph-osd.service
+
+[Install]
+RequiredBy=kubelet.service
+
+[Mount]
+What=/dev/sdc1
+Where=/home/core/data/ceph/osd/ceph-201
+Type=xfs

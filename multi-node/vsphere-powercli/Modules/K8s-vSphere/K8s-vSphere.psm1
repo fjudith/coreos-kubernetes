@@ -34,9 +34,9 @@ This command generate the CA certifcate asset in a subdirectory named "ssl" stor
     {
         $ErrorActionPreference = 'stop'
 
-        $OpenSSLBinary = $(Get-Command -Type 'Application' -Name 'openssl').Path
+        $OpenSSLBinary = $(Get-Command -Type 'Application' -Name 'openssl')[0].Path
 
-        If(-not $(Test-Path -Path $OutputPath)){throw "Output directory path:`"$OutputPath`" does not exists."}
+        If(-not $(Test-Path -Path $OutputPath)){throw "Output directory path:`"${OutputPath}`" does not exists."}
 
         $PEMFile = "${OutputPath}\ca.pem"
         $KeyFile    = "${OutputPath}\ca-key.pem"
@@ -52,7 +52,7 @@ This command generate the CA certifcate asset in a subdirectory named "ssl" stor
         # Generate private key
         Write-Verbose -Message "Generating CA certificate private key path:`"$KeyFile`""
         
-        Start-Process -ErrorAction 'Stop' -Wait -WorkingDirectory $pwd -FilePath $OpenSSLBinary -ArgumentList (
+        Start-Process -ErrorAction 'Stop' -Wait -WorkingDirectory ${pwd} -FilePath ${OpenSSLBinary} -ArgumentList (
             "genrsa",
             "-out",
             "`"${KeyFile}`"",
@@ -148,7 +148,7 @@ This command generates the host certifcate asset in a subdirectory named "ssl" s
     {
         $ErrorActionPreference = 'stop'
 
-        $OpenSSLBinary = $(Get-Command -Type 'Application' -Name 'openssl').Path
+        $OpenSSLBinary = $(Get-Command -Type 'Application' -Name 'openssl')[0].Path
 
         If(-not $(Test-Path -Path $OutputPath)){throw "Output directory path:`"$OutputPath`" does not exists."}
 
@@ -199,7 +199,7 @@ This command generates the host certifcate asset in a subdirectory named "ssl" s
         
         $Log = "${KeyFile}.log"
         
-        Start-Process -RedirectStandardOutput $Log -ErrorAction 'Stop' -Wait -WorkingDirectory $pwd -FilePath $OpenSSLBinary -ArgumentList (
+        Start-Process -RedirectStandardOutput $Log -ErrorAction 'Stop' -Wait -WorkingDirectory ${pwd} -FilePath ${OpenSSLBinary} -ArgumentList (
             "genrsa",
             "-out",
             "`"$KeyFile`"",
@@ -1453,7 +1453,7 @@ Function Set-CoreOSVirtualHardware{
     }
     PROCESS
     {
-        ($VM | Get-HardDisk)[0] | Set-HardDisk -CapacityGB 16 -Confirm:$false  > $Null
+        ($VM | Get-HardDisk)[0] | Set-HardDisk -CapacityGB 32 -Confirm:$false  > $Null
 
         $VM | Set-VM -numCpu "${numCpu}" -MemoryMB "${MemoryMB}" -Confirm:$false > $Null
 

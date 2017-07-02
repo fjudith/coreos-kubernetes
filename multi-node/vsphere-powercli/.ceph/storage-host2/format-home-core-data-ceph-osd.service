@@ -1,0 +1,19 @@
+[Unit]
+Before=kubelet.service home-core-data-ceph-osd.mount
+ConditionPathExists=!/home/core/data/ceph/osd/ceph-201/journal
+ConditionPathExists=!/home/core/data/ceph/osd/ceph-202/journal
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/parted -s /dev/sdb mklabel gpt mkpart 1 xfs 0% 100%
+ExecStart=/usr/sbin/parted -s /dev/sdc mklabel gpt mkpart 1 xfs 0% 100%
+ExecStart=/usr/sbin/parted -s /dev/sdd mklabel gpt mkpart 1 xfs 0% 100%
+ExecStart=/usr/sbin/mkfs.xfs /dev/sdb1 -f
+ExecStart=/usr/sbin/mkfs.xfs /dev/sdc1 -f
+ExecStart=/usr/sbin/mkfs.xfs /dev/sdd1 -f
+ExecStart=/usr/bin/mkdir -p /home/core/data/ceph/osd/ceph-201
+ExecStart=/usr/bin/mkdir -p /home/core/data/ceph/osd/ceph-202
+ExecStart=/usr/bin/chown -R 64045:64045 /home/core/data/ceph/osd
+
+[Install]
+WantedBy=multi-user.target
