@@ -18,41 +18,26 @@ Deployment is performed by acheiving the following activites:
 ## Install Python jinja2
 
 Install python 2.7
-Cd ~/Downloads
+
+```bash
+cd ~/Downloads
 curl -O https://bootstrap.pypa.io/get-pip.py
 cd c:\python27\scripts
 ./pip install jinja2 pyaml
 
-
 export PATH=$PATH:/c/Python27/Scripts
+```
 
 ## Prepare storage worker node disks
 Open an SSH session to the kubernetes node
 
 ```bash
-# Prepare disks
-## Jounal partition
-# sudo parted -s /dev/sdb mklabel gpt mkpart primary 0% 33% mkpart primary 34% 66% mkpart primary 67% 100%
-sudo parted -s /dev/sdb mklabel gpt mkpart 1 xfs 0% 100%
-sudo parted -s /dev/sdc mklabel gpt mkpart 1 xfs 0% 100%
-sudo parted -s /dev/sdd mklabel gpt mkpart 1 xfs 0% 100%
-
-## Format Disks
-sudo mkfs.xfs /dev/sdb1 -f
-sudo mkfs.xfs /dev/sdc1 -f
-sudo mkfs.xfs /dev/sdd1 -f
-
-# Mount partition
-sudo mkdir -p /home/core/data/ceph/osd/ceph-301
-sudo mkdir -p /home/core/data/ceph/osd/ceph-302
-sudo chown -R 64045:64045 /home/core/data/ceph/osd
-sudo mount /dev/sdc1 /home/core/data/ceph/osd/ceph-301
-sudo mount /dev/sdd1 /home/core/data/ceph/osd/ceph-302
+Explain how to send a mount units
 ```
 
 ## Deploy Ceph inside Kubernetes
 
-```shell
+```bash
 ## Install daemon set
 cd ~/git/ceph-docker/examples/kubernetes-coreos
 pushd ~/git/coreos-kubernetes/multi-node/vsphere-powercli/ && . ./init-kubectl.sh && popd
@@ -66,7 +51,7 @@ export osd_cluster_network=10.2.0.0/16
 export osd_pool_default_pg_num=32
 export osd_pool_default_pgp_num=32
 
-## Tagging
+## Label nodes as storage
 
 kubectl label node 192.168.251.201 node-type=storage
 kubectl label node 192.168.251.202 node-type=storage
@@ -101,7 +86,7 @@ kubectl create \
 
 ### CephFS-test
 
-```
+```bash
 kubectl create secret generic ceph-client-key --type="kubernetes.io/rbd" --from-file=./generator/ceph-client-key
 kubectl create -f ceph-cephfs-test.yaml --namespace=ceph
 ```

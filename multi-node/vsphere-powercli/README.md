@@ -1,6 +1,8 @@
-Kubernetes Installation on vSphere with PowerCLI and CoreOS
+Install Kubernetes running on CoreOS hosted in vSphere using PowerCLI
 ===
 This guide walks a deployer though lauching a multi-node Kubernetes cluster using VMware vSphere PowerCLI and CoreOS. After compreting this guide, a deployer will be able to interact with the Kubernetes API from their workstation using the `kubectl` CLI tool.
+
+![K8s-vSphere high-level architecture](./k8s-coreos-vsphere_hld.png)
 
 # RoadMap
 
@@ -14,11 +16,11 @@ This guide walks a deployer though lauching a multi-node Kubernetes cluster usin
 * [ ] Option to test service availability
 * [ ] Option to export vSphere VM specifications in CliXml format
 
-# Install Prerequisites
+# Prerequisites
 
-The K8s-vSphere Powershell modules hardly depends on Windows Powershell 5.O features, vSphre PowerCLI 6.3 and Git Bash.
+The `K8s-vSphere` Powershell modules hardly depends on Windows Powershell 5.O features, vSphere PowerCLI 6.3 and Git Bash.
 
-Navigate to the following download page to grabe the appropriate software pages
+Navigate to the following download page to grabe the appropriate software download pages.
 
 * [.Net Framwork 4.5.2](https://support.microsoft.com/en-us/help/2901907/microsoft-.net-framework-4.5.2-offline-installer-for-windows-server-2012-r2,-windows-8.1,-windows-server-2012,-windows-8,-windows-server-2008-r2-sp1,-windows-7-sp1,-windows-server-2008-sp2,-and-windows-vista-sp2)
 * [Windows Management Framework](https://msdn.microsoft.com/en-us/powershell/wmf/5.1/release-notes)
@@ -26,20 +28,19 @@ Navigate to the following download page to grabe the appropriate software pages
 * [VMware vSphere Power CLI](https://code.vmware.com/web/dp/tool/vsphere_powercli/6.5)
 
 ## Administrative permission
-Deployer must own Administrative permission on the workstation in order ton install the several software packages required. 
+
+Deployer must own Administrative permissions on the workstation in order ton install the required software packages required. 
 
 **Windows Powershell must runs as an Administrator**. 
 
 ## Chocolatey
 
 Chocolatey is an advanded software package manager similar to nuGet and brew (MacOS).
-It will be used to install the various software pre-requisites to run the deployment scritps
+It will be used to install the various software pre-requisites to run the deployment scripts
 
 ## Windows Management Framework 5.1
 
-
-
-If WMF version 5.0 or later is not installed.
+If WMF version 5.0 or later is not installed. Run the following command line in `Windows Powershell` command prompt running as an Administrator.
 
 ```powershell
 choco install powershell

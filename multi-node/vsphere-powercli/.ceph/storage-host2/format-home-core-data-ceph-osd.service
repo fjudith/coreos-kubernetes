@@ -1,7 +1,7 @@
 [Unit]
 Before=kubelet.service home-core-data-ceph-osd.mount
-ConditionPathExists=!/home/core/data/ceph/osd/ceph-201/journal
-ConditionPathExists=!/home/core/data/ceph/osd/ceph-202/journal
+ConditionPathExists=!/home/core/data/ceph/osd/ceph-201/ceph_fsid
+ConditionPathExists=!/home/core/data/ceph/osd/ceph-202/ceph_fsid
 
 [Service]
 Type=oneshot

@@ -1,7 +1,7 @@
 [Unit]
-Before=docker.service home-core-data-ceph-osd.mount
-ConditionPathExists=!/home/core/data/ceph/osd/ceph-101/journal
-ConditionPathExists=!/home/core/data/ceph/osd/ceph-102/journal
+Before=kubelet.service home-core-data-ceph-osd.mount
+ConditionPathExists=!/home/core/data/ceph/osd/ceph-101/ceph_fsid
+ConditionPathExists=!/home/core/data/ceph/osd/ceph-102/ceph_fsid
 
 [Service]
 Type=oneshot
