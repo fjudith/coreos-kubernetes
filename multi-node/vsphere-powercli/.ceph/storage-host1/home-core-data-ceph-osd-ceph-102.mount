@@ -10,3 +10,4 @@ RequiredBy=kubelet.service
 What=/dev/sdd1
 Where=/home/core/data/ceph/osd/ceph-102
 Type=xfs
+DirectoryMode=0777
