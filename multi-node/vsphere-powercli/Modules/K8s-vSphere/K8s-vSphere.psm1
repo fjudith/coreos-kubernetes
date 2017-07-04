@@ -269,8 +269,11 @@ Specifies IP addresses to be added in the certificate subject alternative name (
 .PARAMETER Computername
 Specifies the computers target for SCP commands.
 
-.PARAMETER Credential
+.PARAMETER SSHCredential
 Specifies a user account that has permission to perform the SSH action.
+
+.PARAMETER SSHKeyFile
+Specifies specifies the path to the SSH private key file.
 
 .PARAMETER SSHSession
 Specifies the "New-SSHSession" session ID to be by the SSH commands.
@@ -314,7 +317,11 @@ General notes
     
         [parameter(mandatory=$false)]
         [PSCredential]
-        $Credential,
+        $SSHCredential,
+
+        [parameter(mandatory=$false)]
+        [String]
+        $SSHKeyFile,
 
         [parameter(mandatory=$true)]
         [int]
@@ -332,7 +339,7 @@ General notes
     {
         Write-K8sCertificate -OutputPath "${pwd}\ssl" -Name "${CertificateBaseName}" -CommonName "${CommonName}" -SubjectAlternativeName $IpString
 
-        Set-ScpFile  -Force -LocalFile $ZipFile -RemotePath '/tmp/' -ComputerName $Computername -Credential $Credential
+        Set-ScpFile  -Force -LocalFile $ZipFile -RemotePath '/tmp/' -ComputerName $Computername -Credential $SSHCredential -KeyFile $SSHKeyFile
         Invoke-SSHCommand -SessionId $SSHSession -Command "sudo mkdir -p /etc/kubernetes/ssl && sudo unzip -o -e /tmp/${CommonName}.zip -d /etc/kubernetes/ssl"
     }
 }
@@ -899,7 +906,11 @@ Function New-K8sEtcdCluster
 
         [parameter(mandatory=$false)]
         [string]
-        $CloudConfigFile = "${pwd}\etcd-cloud-config.yaml"
+        $CloudConfigFile = "${pwd}\etcd-cloud-config.yaml",
+
+        [parameter(mandatory=$false)]
+        [string]
+        $SSHPublicKeyFile = "${env:USERPROFILE}\.ssh\k8s-vsphere_id_rsa.pub"       
     )
     BEGIN
     {
@@ -929,6 +940,8 @@ Function New-K8sEtcdCluster
             $Config = Get-Content -Path "${CloudConfigFile}" 
             $Config = $Config -Replace '\{\{ETCD_NODE_NAME\}\}',$Name
             $Config = $Config -Replace '\{\{ETCD_INITIAL_CLUSTER\}\}',$EtcdCluster
+            $Config += "ssh_authorized_keys:"
+            $Config += "  - `"$(Get-Content -Path $SSHPublicKeyFile -ReadCount 1)`""
             Set-Content -Path $ConfigPath -Value $Config
 
             $GuestInfo = @{
@@ -1044,10 +1057,18 @@ Function New-K8sControllerCluster
         [parameter(mandatory=$false)]
         [string]
         $CloudConfigFile = "${pwd}\controller-cloud-config.yaml",
-        
+
         [parameter(mandatory=$false)]
         [PSCredential]
         $SSHCredential,
+
+        [parameter(mandatory=$false)]
+        [string]
+        $SSHPrivateKeyFile = "${env:USERPROFILE}\.ssh\k8s-vsphere_id_rsa",
+        
+        [parameter(mandatory=$false)]
+        [string]
+        $SSHPublicKeyFile = "${env:USERPROFILE}\.ssh\k8s-vsphere_id_rsa.pub",
 
         [parameter(mandatory=$false)]
         [string]
@@ -1068,7 +1089,10 @@ Function New-K8sControllerCluster
     BEGIN
     {
         $IpAddresses = Get-K8sControllerIP -Subnet $Subnet -StartFrom $StartFrom -Count $Count -ControllerCluster $ControllerCluster
-        
+        Write-Host -NoNewline -Object "Deploying controller count ["
+        Write-Host -NoNewline -ForegroundColor 'cyan' -Object "${SSHPrivateKeyFile}"
+        Write-Host -Object "]"
+
         Write-Host -NoNewline -Object "Deploying controller count ["
         Write-Host -NoNewline -ForegroundColor 'green' -Object "${Count}"
         Write-Host -Object "]"
@@ -1089,6 +1113,8 @@ Function New-K8sControllerCluster
             New-Item -Force -ItemType 'Directory' -Path $(([System.IO.fileInfo]$ConfigPath).DirectoryName) > $Null
             $Config = Get-Content -Path "${CloudConfigFile}"
             $Config = $Config -Replace '\{\{ETCD_ENDPOINTS\}\}',$EtcdEndpoints
+            $Config += "ssh_authorized_keys:"
+            $Config += "  - `"$(Get-Content -Path $SSHPublicKeyFile -ReadCount 1)`""
             Set-Content -Path $ConfigPath -Value $Config
 
             $GuestInfo = @{
@@ -1137,14 +1163,14 @@ Function New-K8sControllerCluster
             Test-TcpConnection -ComputerName $IP -Port 22 -Loop
 
             # Open SSH Session
-            $SSHSessionID = $(New-SSHSession -ComputerName $IP -Credential $SSHCredential -Force).SessionID
+            $SSHSessionID = $(New-SSHSession -ComputerName $IP -Credential $SSHCredential -KeyFile $SSHPrivateKeyFile -Force).SessionID
 
             # Generate and copy SSL asset
             Send-SSHMachineSSL -CertificateBaseName 'apiserver' -CommonName "kube-apiserver-${IP}" -IpAddresses $IpAddresses `
-            -SubjectAlternativeName $ControllerEndpoint -Computername $IP -Credential $SSHCredential  -SSHSession $SSHSessionID
+            -SubjectAlternativeName $ControllerEndpoint -Computername $IP -SSHCredential $SSHCredential -SSHKeyFile $SSHPrivateKeyFile  -SSHSession $SSHSessionID
                     
             # Copy kubernetes worker configuration asset
-            Set-ScpFile -Force -LocalFile "${InstallScript}" -RemotePath '/tmp/' -ComputerName $IP -Credential $SSHCredential
+            Set-ScpFile -Force -LocalFile "${InstallScript}" -RemotePath '/tmp/' -ComputerName $IP -Credential $SSHCredential -KeyFile $SSHPrivateKeyFile
             Invoke-SSHCommand -Index $SSHSessionID -Command 'cd /tmp/ && mv controller-install.sh vsphere-user-data'
             Invoke-SSHCommand -Index $SSHSessionID -Command 'sudo mkdir -p /var/lib/coreos-vsphere && sudo mv /tmp/vsphere-user-data /var/lib/coreos-vsphere/'
 
@@ -1234,6 +1260,14 @@ Function New-K8sWorkerCluster
 
         [parameter(mandatory=$false)]
         [string]
+        $SSHPrivateKeyFile = "${env:USERPROFILE}\.ssh\k8s-vsphere_id_rsa",
+        
+        [parameter(mandatory=$false)]
+        [string]
+        $SSHPublicKeyFile = "${env:USERPROFILE}\.ssh\k8s-vsphere_id_rsa.pub",
+
+        [parameter(mandatory=$false)]
+        [string]
         $InstallScript,
 
         [parameter(mandatory=$true)]
@@ -1267,6 +1301,8 @@ Function New-K8sWorkerCluster
             $Config = Get-Content -Path "${CloudConfigFile}"
             $Config = $Config -Replace '\{\{ETCD_ENDPOINTS\}\}',$EtcdEndpoints
             $Config = $Config -Replace '\{\{CONTROLLER_ENDPOINT\}\}',$ControllerEndpoint
+            $Config += "ssh_authorized_keys:"
+            $Config += "  - `"$(Get-Content -Path $SSHPublicKeyFile -ReadCount 1)`""
             Set-Content -Path $ConfigPath -Value $Config
 
             $GuestInfo = @{
@@ -1314,13 +1350,13 @@ Function New-K8sWorkerCluster
             Test-TcpConnection -ComputerName $IP -Port 22 -Loop
 
             # Open SSH Session
-            $SSHSessionID = $(New-SSHSession -ComputerName $IP -Credential $SSHCredential -Force).SessionID
+            $SSHSessionID = $(New-SSHSession -ComputerName $IP -Credential $SSHCredential -KeyFile $SSHPrivateKeyFile -Force).SessionID
 
             Send-SSHMachineSSL -CertificateBaseName 'worker' -CommonName "kube-worker-${IP}" -IpAddresses $IP `
-            -Computername $IP -Credential $SSHCredential -SSHSession $SSHSessionID
+            -Computername $IP -SSHCredential $SSHCredential -SSHKeyFile $SSHPrivateKeyFile -SSHSession $SSHSessionID
 
             # Copy kubernetes worker configuration asset
-            Set-ScpFile -Force -LocalFile "${InstallScript}" -RemotePath '/tmp/' -ComputerName $IP -Credential $SSHCredential
+            Set-ScpFile -Force -LocalFile "${InstallScript}" -RemotePath '/tmp/' -ComputerName $IP -Credential $SSHCredential -KeyFile $SSHPrivateKeyFile
             Invoke-SSHCommand -Index $SSHSessionID -Command 'cd /tmp/ && mv worker-install.sh vsphere-user-data'
             Invoke-SSHCommand -Index $SSHSessionID -Command 'sudo mkdir -p /var/lib/coreos-vsphere && sudo mv /tmp/vsphere-user-data /var/lib/coreos-vsphere/'
             # Invoke-SSHCommand -Index $SSHSessionID -Command 'sudo systemctl enable docker'
@@ -1564,5 +1600,76 @@ Function Wait-VMGuest{
         Write-Host -NoNewline -Object "$($VM.Name) `(${Operation}`): VMware Tools Status [" 
         Write-Host -NoNewline -ForegroundColor 'green' -Object $Status
         Write-Host -Object "]"
+    }
+}
+
+Function Write-K8sSSHkey
+{
+<#
+.SYNOPSIS
+Generate the SSH Key to access CoreOS Container Linux hosts
+
+- $env:USERPROFILE\.ssh\k8s-vphere_id_rsa
+- $env:USERPROFILE\.ssh\k8s-vphere_id_rsa.pub
+
+.DESCRIPTION
+Use OpenSSL to create the SSL Certificate Authority certificate asset for Kubernetes.
+
+.PARAMETER OutputPath
+Specifies the directory where the CA private key and certicate will be written.
+
+.EXAMPLE
+PS C:\> Write-K8sSSHKey -Outfile "${env:USERPROFILE}\.ssh\k8s-vsphere_id"
+
+LastWriteTime : 04/07/2017 14:02:42
+Length        : 1675
+Name          : k8s-vsphere_id_rsa
+
+
+LastWriteTime : 04/07/2017 14:02:42
+Length        : 402
+Name          : k8s-vsphere_id_rsa.pub
+
+This command generate the SSH key asset in the specified directory.
+#>
+    PARAM(
+        [parameter(mandatory=$False)]
+        [String]
+        $Outfile = "${env:USERPROFILE}\.ssh\k8s-vsphere_id_rsa"
+    )
+    BEGIN
+    {
+        $ErrorActionPreference = 'stop'
+
+        $DirectoryName  = ([System.IO.FileInfo]$Outfile).DirectoryName
+        $FileName       = ([System.IO.FileInfo]$Outfile).Name
+
+        Try
+        {
+            $SSHKeygenBinary = $(Get-Command -Type 'Application' -Name 'ssh-keygen')[0].Path
+        }
+        Catch
+        {
+            $SSHKeygenBinary = Get-ChildItem -Path "${env:PROGRAMFILES}\Git\usr\bin\ssh-keygen.exe"
+        } 
+    }
+    PROCESS
+    {
+        # Generate SSH key
+        If(-Not $(Test-Path -Path $Outfile))
+        {
+            Write-Warning "hello"
+            Start-Process -ErrorAction 'Stop' -Wait -WorkingDirectory "${DirectoryName}" -FilePath "${SSHKeygenBinary}" -ArgumentList (
+                '-t rsa', 
+                "-f ${FileName}",
+                '-q',
+                '-P ""',
+                '-C K8s-vSphere@PowerCLI'
+            ) -NoNewWindow
+        }
+    }
+    END
+    {
+        Write-Output -InputObject $(Get-ChildItem -Path "${Outfile}*")
     }
 }

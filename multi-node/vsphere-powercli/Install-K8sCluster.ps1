@@ -45,8 +45,8 @@ PARAM(
     ),
 
     # CoreOS Remote user
-    [parameter(mandatory=$false)][String]$SSHUser = 'k8s-vsphere',
-    [parameter(mandatory=$false)][String]$SSHPassword = 'K8S-vsph3r3',
+    [parameter(mandatory=$false)][String]$SSHUser = 'core',
+    [parameter(mandatory=$false)][String]$SSHPassword,
 
     # CoreOS host dns records
     [parameter(mandatory=$false)][string[]]$DnsServer = @(
@@ -81,13 +81,41 @@ BEGIN{
     }
 
     # Import Powershell Module
+    # VMware vSphere PowerCLI
     Import-Module -Name 'VMware.VimAutomation.Core'
+
+    # K8s-vSphere
     Import-Module -Force -Name "${pwd}\Modules\K8s-vSphere"
-    Import-module -Force -Name "${pwd}\Modules\Posh-SSH"
-    
+
+    # Posh-SSH
+    If(-Not $(Get-Module -Name 'Posh-SSH') -and -Not $(Test-Path -Path "${env:USERPROFILE}\Documents\WindowsPowershell\Modules\Posh-SSH"))
+    {
+        New-Item -Force -ItemType 'Directory' -Path "${env:USERPROFILE}\Documents\WindowsPowershell\Modules" > $Null
+        Invoke-WebRequest -Uri 'https://github.com/darkoperator/Posh-SSH/archive/master.zip' -OutFile "${env:TEMP}\Posh-SSH.zip"
+
+        Expand-Archive -Path "${env:TEMP}\Posh-SSH.zip" -OutputPath "${env:USERPROFILE}\Documents\WindowsPowershell\Modules\" 
+        Rename-Item -Path "${env:USERPROFILE}\Documents\WindowsPowershell\Modules\Posh-SSH-master" -NewName "Posh-SSH" -Force
+    }
+    Import-module -Force -Name 'Posh-SSH'
+
+    # Create SSH Key
+    Write-K8sSSHkey -Outfile "${env:USERPROFILE}\.ssh\k8s-vsphere_id_rsa"
+    $SSHPrivateKeyFile = "${env:USERPROFILE}\.ssh\k8s-vsphere_id_rsa"
+    $SSHPublicKeyFile = "${env:USERPROFILE}\.ssh\k8s-vsphere_id_rsa.pub"
+
     # Create SSH Credential Object
-    $SecureHostPassword = ConvertTo-SecureString "${SSHPassword}" -AsPlainText -Force
-    $SSHCredential = New-Object System.Management.Automation.PSCredential ("${SSHUser}", $SecureHostPassword)
+    If($SSHPassword)
+    {
+        $SecureHostPassword = ConvertTo-SecureString "${SSHPassword}" -AsPlainText -Force
+        $SSHCredential = New-Object System.Management.Automation.PSCredential ("${SSHUser}", $SecureHostPassword)
+    }
+    Else
+    {
+        $SecureHostPassword = (new-object System.Security.SecureString)
+        $SSHCredential = New-Object System.Management.Automation.PSCredential ("${SSHUser}", $SecureHostPassword) 
+    }
+    $SSHCredential
+    Start-Sleep 10
 
     $EtcdCloudConfigFile = ([System.IO.FileInfo]"${pwd}\etcd-cloud-config.yaml").FullName
     $ControllerCloudConfigFile = ([System.IO.FileInfo]"${pwd}\controller-cloud-config.yaml").FullName
@@ -101,7 +129,6 @@ BEGIN{
 
     # Building a single string for Etcd Cluster Node list containing Etcd hostnames and URLs as per given etcd count
     $InitialEtcdCluster = Get-K8sEtcdInitialCluster -NamePrefix $EtcdNamePrefix -IpAddress $EtcdIPs
-
 
     # Building a single string for Etcd Endpoints Node list containing Etcd URLs as per given etcd count
     $EtcdEndpoints = Get-K8sEtcdEndpoint -IpAddress $EtcdIPs -Protocol 'http' -Port '2379'
@@ -148,7 +175,7 @@ PROCESS{
         -Subnet $EtcdSubnet -CIDR $EtcdCIDR -Gateway $EtcdGateway -DNS $DnsServer `
         -StartFrom $EtcdStartFrom -Count $EtcdCount -NamePrefix $EtcdNamePrefix `
         -DataStore $Datastore -PortGroup $PortGroup -DiskstorageFormat $DiskStorageFormat `
-        -CloudConfigFile $EtcdCloudConfigFile
+        -CloudConfigFile $EtcdCloudConfigFile -SSHPublicKeyFile $SSHKey[1].FullName
     }
     ElseIf($Cluster)
     {
@@ -156,7 +183,7 @@ PROCESS{
         -Subnet $EtcdSubnet -CIDR $EtcdCIDR -Gateway $EtcdGateway -DNS $DnsServer `
         -StartFrom $EtcdStartFrom -Count $EtcdCount -NamePrefix $EtcdNamePrefix `
         -DataStore $Datastore -PortGroup $PortGroup -DiskstorageFormat $DiskStorageFormat `
-        -CloudConfigFile $EtcdCloudConfigFile
+        -CloudConfigFile $EtcdCloudConfigFile -SSHPublicKeyFile $SSHPublicKeyFile
     }
 
     # Controller
@@ -170,7 +197,7 @@ PROCESS{
         -DataStore $Datastore -PortGroup $PortGroup -DiskstorageFormat $DiskStorageFormat `
         -CloudConfigFile $ControllerCloudConfigFile -InstallScript $ControllerCloudConfigPath `
         -EtcdEndpoints $EtcdEndpoints -ControllerCluster $ControllerClusterIP -ControllerEndpoint $ControllerEndpoint `
-        -SSHCredential $SSHCredential
+        -SSHCredential $SSHCredential -SSHPrivateKeyFile $SSHPrivateKeyFile -SSHPublicKeyFile $SSHPublicKeyFile
     }
     ElseIf($Cluster)
     {
@@ -180,7 +207,7 @@ PROCESS{
         -DataStore $Datastore -PortGroup $PortGroup -DiskstorageFormat $DiskStorageFormat `
         -CloudConfigFile $ControllerCloudConfigFile -InstallScript $ControllerCloudConfigPath `
         -EtcdEndpoints $EtcdEndpoints -ControllerCluster $ControllerClusterIP -ControllerEndpoint $ControllerEndpoint `
-        -SSHCredential $SSHCredential
+        -SSHCredential $SSHCredential -SSHPrivateKeyFile $SSHPrivateKeyFile -SSHPublicKeyFile $SSHPublicKeyFile
     }
 
     # Worker
@@ -193,7 +220,7 @@ PROCESS{
         -DataStore $Datastore -PortGroup $PortGroup -DiskstorageFormat $DiskStorageFormat `
         -CloudConfigFile $WorkerCloudConfigFile -InstallScript $WorkerCloudConfigPath `
         -EtcdEndpoints $EtcdEndpoints -ControllerEndpoint $ControllerEndpoint `
-        -SSHCredential $SSHCredential
+        -SSHCredential $SSHCredential -SSHPrivateKeyFile $SSHPrivateKeyFile -SSHPublicKeyFile $SSHPublicKeyFile
     }
     ElseIf($Cluster)
     {
@@ -203,7 +230,7 @@ PROCESS{
         -DataStore $Datastore -PortGroup $PortGroup -DiskstorageFormat $DiskStorageFormat `
         -CloudConfigFile $WorkerCloudConfigFile -InstallScript $WorkerCloudConfigPath `
         -EtcdEndpoints $EtcdEndpoints -ControllerEndpoint $ControllerEndpoint `
-        -SSHCredential $SSHCredential
+        -SSHCredential $SSHCredential -SSHPrivateKeyFile $SSHPrivateKeyFile -SSHPublicKeyFile $SSHPublicKeyFile
     }
 }
 END{

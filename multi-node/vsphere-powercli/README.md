@@ -57,6 +57,8 @@ choco install powershell
 
 Navigate to the [Windows Management Framework 5.x downloads page]() and grabe the appropriate package for your system. Install the WMF update before continuing. 
 
+
+
 ## Install Git for Windows
 
 Git for Windows is required to genereate the SSL asset a
