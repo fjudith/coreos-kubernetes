@@ -1635,7 +1635,11 @@ This command generate the SSH key asset in the specified directory.
     PARAM(
         [parameter(mandatory=$False)]
         [String]
-        $Outfile = "${env:USERPROFILE}\.ssh\k8s-vsphere_id_rsa"
+        $Outfile = "${env:USERPROFILE}\.ssh\k8s-vsphere_id_rsa",
+
+        [parameter(mandatory=$False)]
+        [String]
+        $PassPhrase
     )
     BEGIN
     {
@@ -1663,8 +1667,8 @@ This command generate the SSH key asset in the specified directory.
                 '-t rsa', 
                 "-f ${FileName}",
                 '-q',
-                '-P ""',
-                '-C K8s-vSphere@PowerCLI'
+                "-P `"${PassPhrase}`"",
+                '-C core@K8s-vSphere'
             ) -NoNewWindow
         }
     }

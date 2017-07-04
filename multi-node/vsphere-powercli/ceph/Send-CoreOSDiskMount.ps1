@@ -10,10 +10,14 @@ PARAM(
     # CoreOS Remote user
     [parameter(mandatory=$false)]
     [String]
-    $SSHUser = 'core',
-    
+    $User = 'core',
+
     [parameter(mandatory=$false)]
-    [String]$SSHPassword = '',
+    [String]
+    $Password,
+
+    [parameter(mandatory=$false)]
+    [String]$KeyFile = "${env:USERPROFILE}",
 )
 BEGIN{
 
@@ -31,6 +35,14 @@ BEGIN{
 }
 PROCESS{
     $Server.Keys | foreach{
+        $ComputerName = $Server[$_]
+        $Files = Get-ChildItem -Path "${pwd}\$($_)\"
+
+        Foreach($File in $Files)
+        {
+            Set-ScpFile  -Force -LocalFile $File -RemotePath '/tmp/' -ComputerName $Computername -Credential $SSHCredential -KeyFile $SSHKeyFile
+        }
+
         $vmx += "$($_) = $($GuestInfo[$_])" + "`n"
 
     }

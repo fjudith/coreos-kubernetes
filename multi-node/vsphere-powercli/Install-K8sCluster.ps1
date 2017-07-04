@@ -99,23 +99,23 @@ BEGIN{
     Import-module -Force -Name 'Posh-SSH'
 
     # Create SSH Key
-    Write-K8sSSHkey -Outfile "${env:USERPROFILE}\.ssh\k8s-vsphere_id_rsa"
+    Write-K8sSSHkey -Outfile "${env:USERPROFILE}\.ssh\k8s-vsphere_id_rsa" -Passphrase $SSHPassword
     $SSHPrivateKeyFile = "${env:USERPROFILE}\.ssh\k8s-vsphere_id_rsa"
     $SSHPublicKeyFile = "${env:USERPROFILE}\.ssh\k8s-vsphere_id_rsa.pub"
 
     # Create SSH Credential Object
+    # Password will be used as the SSH key passphrase
     If($SSHPassword)
     {
         $SecureHostPassword = ConvertTo-SecureString "${SSHPassword}" -AsPlainText -Force
-        $SSHCredential = New-Object System.Management.Automation.PSCredential ("${SSHUser}", $SecureHostPassword)
     }
     Else
     {
+        # Empty Password
         $SecureHostPassword = (new-object System.Security.SecureString)
-        $SSHCredential = New-Object System.Management.Automation.PSCredential ("${SSHUser}", $SecureHostPassword) 
+        
     }
-    $SSHCredential
-    Start-Sleep 10
+    $SSHCredential = New-Object System.Management.Automation.PSCredential ("${SSHUser}", $SecureHostPassword) 
 
     $EtcdCloudConfigFile = ([System.IO.FileInfo]"${pwd}\etcd-cloud-config.yaml").FullName
     $ControllerCloudConfigFile = ([System.IO.FileInfo]"${pwd}\controller-cloud-config.yaml").FullName
