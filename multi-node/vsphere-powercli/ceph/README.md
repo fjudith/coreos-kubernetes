@@ -75,12 +75,26 @@ cd ..
 
 kubectl create -f https://github.com/ReSearchITEng/kubeadm-playbook/raw/master/allow-all-all-rbac.yml
 
+# Ceph Monitor (MON)
 kubectl create \
 -f ceph-mds-v1-dp.yaml \
 -f ceph-mon-v1-svc.yaml \
 -f ceph-mon-v1-dp.yaml \
 -f ceph-mon-check-v1-dp.yaml \
+--namespace=ceph
+
+sleep 300
+
+# Ceph Object Store Deamon (OSD)
+kubectl create \
 -f ceph-osd-v1-ds.yaml \
+--namespace=ceph
+
+sleep 300
+
+# Ceph Meta Data Server (MDS)
+kubectl create \
+-f ceph-mds-v1-dp.yaml  \
 --namespace=ceph
 ```
 
