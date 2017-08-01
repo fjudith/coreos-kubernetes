@@ -1,11 +1,11 @@
 PARAM(
     [parameter(mandatory=$false)]
     [hashtable]
-    Server = @{
+    $Server = @{
         'storage-host1' = '192.168.251.201' ;
         'storage-host2' = '192.168.251.202' ;
         'storage-host3' = '192.168.251.203' ;
-    }
+    },
 
     # CoreOS Remote user
     [parameter(mandatory=$false)]
@@ -17,7 +17,7 @@ PARAM(
     $Password,
 
     [parameter(mandatory=$false)]
-    [String]$KeyFile = "${env:USERPROFILE}",
+    [String]$KeyFile = "${env:USERPROFILE}\.ssh\k8s-vsphere_id_rsa"
 )
 BEGIN{
 
@@ -32,18 +32,38 @@ BEGIN{
     }
     Import-module -Force -Name 'Posh-SSH'
 
+    # Create SSH Credential Object
+    # Password will be used as the SSH key passphrase
+    If($Password)
+    {
+        $SecureHostPassword = ConvertTo-SecureString "${Password}" -AsPlainText -Force
+    }
+    Else
+    {
+        # Empty Password
+        $SecureHostPassword = (new-object System.Security.SecureString)
+        
+    }
+    $Credential = New-Object System.Management.Automation.PSCredential ("${User}", $SecureHostPassword)
+    
+
 }
 PROCESS{
-    $Server.Keys | foreach{
+    $Server.Keys | Foreach{
         $ComputerName = $Server[$_]
-        $Files = Get-ChildItem -Path "${pwd}\$($_)\"
+        $Files = Get-ChildItem -Path "${pwd}\$($_)\" -Exclude 'README.md'
+        $SSHSessionID = $(New-SSHSession -ComputerName $ComputerName -Credential $Credential -KeyFile $KeyFile -Force).SessionID
+
 
         Foreach($File in $Files)
         {
-            Set-ScpFile  -Force -LocalFile $File -RemotePath '/tmp/' -ComputerName $Computername -Credential $SSHCredential -KeyFile $SSHKeyFile
+            $SystemdUnit        = $File.Name -replace '(ceph)\-(\d{3})','$1\\x2d$2'
+            
+            Set-ScpFile  -Force -LocalFile $File -RemotePath "/tmp/" -ComputerName $Computername -Credential $Credential -KeyFile $KeyFile
+            
+            Invoke-SSHCommand -Index $SSHSessionID -Command "export TERM=xterm; sudo mv /tmp/$($File.Name) /etc/systemd/system/${SystemdUnit}"
+            
+            Invoke-SSHCommand -Index $SSHSessionID -Command "sudo systemctl enable ${SystemdUnit}"
         }
-
-        $vmx += "$($_) = $($GuestInfo[$_])" + "`n"
-
     }
 }
