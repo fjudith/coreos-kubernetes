@@ -5,7 +5,7 @@ set -e
 export ETCD_ENDPOINTS=
 
 # Specify the version (vX.Y.Z) of Kubernetes assets to deploy
-export K8S_VER=v1.6.1_coreos.0
+export K8S_VER=v1.7.3_coreos.0
 
 # Hyperkube image repository to use.
 export HYPERKUBE_IMAGE_REPO=quay.io/coreos/hyperkube
@@ -916,7 +916,7 @@ spec:
         # container programs network policy and routes on each
         # host.
         - name: calico-node
-          image: quay.io/calico/node:v1.2.0
+          image: quay.io/calico/node:v2.4.1
           env:
             # The location of the Calico etcd cluster.
             - name: ETCD_ENDPOINTS
@@ -949,7 +949,7 @@ spec:
         # This container installs the Calico CNI binaries
         # and CNI network config file on each node.
         - name: install-cni
-          image: quay.io/calico/cni:v1.5.2
+          image: quay.io/calico/cni:v1.10.0
           imagePullPolicy: Always
           command: ["/install-cni.sh"]
           env:
@@ -1023,7 +1023,7 @@ spec:
       hostNetwork: true
       containers:
         - name: calico-policy-controller
-          image: calico/kube-policy-controller:v0.4.0
+          image: calico/kube-policy-controller:v0.7.0
           env:
             # The location of the Calico etcd cluster.
             - name: ETCD_ENDPOINTS

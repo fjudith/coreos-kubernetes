@@ -123,7 +123,7 @@ Note that the kubelet running on a master node may log repeated attempts to post
 
 * Replace `${ADVERTISE_IP}` with this node's publicly routable IP.
 * Replace `${DNS_SERVICE_IP}`
-* Replace `${K8S_VER}` This will map to: `quay.io/coreos/hyperkube:${K8S_VER}` release, e.g. `v1.6.1_coreos.0`.
+* Replace `${K8S_VER}` This will map to: `quay.io/coreos/hyperkube:${K8S_VER}` release, e.g. `v1.7.3_coreos.0`.
 * If using Calico for network policy
   - Replace `${NETWORK_PLUGIN}` with `cni`
   - Add the following to `RKT_RUN_ARGS=`
@@ -196,7 +196,7 @@ spec:
   hostNetwork: true
   containers:
   - name: kube-apiserver
-    image: quay.io/coreos/hyperkube:v1.6.1_coreos.0
+    image: quay.io/coreos/hyperkube:v1.7.3_coreos.0
     command:
     - /hyperkube
     - apiserver
@@ -263,7 +263,7 @@ spec:
   hostNetwork: true
   containers:
   - name: kube-proxy
-    image: quay.io/coreos/hyperkube:v1.6.1_coreos.0
+    image: quay.io/coreos/hyperkube:v1.7.3_coreos.0
     command:
     - /hyperkube
     - proxy
@@ -302,7 +302,7 @@ spec:
   hostNetwork: true
   containers:
   - name: kube-controller-manager
-    image: quay.io/coreos/hyperkube:v1.6.1_coreos.0
+    image: quay.io/coreos/hyperkube:v1.7.3_coreos.0
     command:
     - /hyperkube
     - controller-manager
@@ -354,7 +354,7 @@ spec:
   hostNetwork: true
   containers:
   - name: kube-scheduler
-    image: quay.io/coreos/hyperkube:v1.6.1_coreos.0
+    image: quay.io/coreos/hyperkube:v1.7.3_coreos.0
     command:
     - /hyperkube
     - scheduler
@@ -455,7 +455,7 @@ spec:
         # container programs network policy and routes on each
         # host.
         - name: calico-node
-          image: quay.io/calico/node:v1.2.0
+          image: quay.io/calico/node:v2.4.1
           env:
             # The location of the Calico etcd cluster.
             - name: ETCD_ENDPOINTS
@@ -488,7 +488,7 @@ spec:
         # This container installs the Calico CNI binaries
         # and CNI network config file on each node.
         - name: install-cni
-          image: quay.io/calico/cni:v1.5.2
+          image: quay.io/calico/cni:v1.10.0
           imagePullPolicy: Always
           command: ["/install-cni.sh"]
           env:
@@ -562,7 +562,7 @@ spec:
       hostNetwork: true
       containers:
         - name: calico-policy-controller
-          image: calico/kube-policy-controller:v0.4.0
+          image: calico/kube-policy-controller:v0.7.0
           env:
             # The location of the Calico etcd cluster.
             - name: ETCD_ENDPOINTS
