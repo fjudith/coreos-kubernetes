@@ -133,7 +133,8 @@ ExecStart=/usr/lib/coreos/kubelet-wrapper \
   --pod-manifest-path=/etc/kubernetes/manifests \
   --hostname-override=${ADVERTISE_IP} \
   --cluster_dns=${DNS_SERVICE_IP} \
-  --cluster_domain=cluster.local
+  --cluster_domain=cluster.local \
+  --volume-plugin-dir=/etc/kubernetes/volumeplugins
 ExecStop=-/usr/bin/rkt stop --uuid-file=${uuid_file}
 Restart=always
 RestartSec=10
@@ -329,6 +330,7 @@ spec:
     - --leader-elect=true
     - --service-account-private-key-file=/etc/kubernetes/ssl/apiserver-key.pem
     - --root-ca-file=/etc/kubernetes/ssl/ca.pem
+    - --flex-volume-plugin-dir=/etc/kubernetes/volumeplugins
     resources:
       requests:
         cpu: 200m
@@ -346,6 +348,9 @@ spec:
     - mountPath: /etc/ssl/certs
       name: ssl-certs-host
       readOnly: true
+    - mountPath: /etc/kubernetes/volumeplugins
+      name: volumeplugins-host
+      readonly: false
   hostNetwork: true
   volumes:
   - hostPath:
@@ -354,6 +359,9 @@ spec:
   - hostPath:
       path: /usr/share/ca-certificates
     name: ssl-certs-host
+  - hostPath:
+      path: /etc/kubernetes/volumeplugins
+    name: volumeplugins-host
 EOF
     fi
 
