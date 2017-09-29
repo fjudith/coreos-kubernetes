@@ -1075,9 +1075,13 @@ function start_addons {
 }
 
 function start_calico {
-    echo "Waiting for Kubernetes API..."
-    # wait for the API
+    echo "Waiting for Kubernetes API and extensions..."
+    # wait for the API and extensions such as daemonset
     until curl --silent "http://127.0.0.1:8080/version/"
+    do
+        sleep 5
+    done
+    until curl --silent "http://127.0.0.1:8080/apis/extensions/v1beta1" | grep daemonset
     do
         sleep 5
     done
