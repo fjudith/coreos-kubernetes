@@ -5,7 +5,7 @@ set -e
 export ETCD_ENDPOINTS=
 
 # Specify the version (vX.Y.Z) of Kubernetes assets to deploy
-export K8S_VER=v1.6.1_coreos.0
+export K8S_VER=v1.7.3_coreos.0
 
 # Hyperkube image repository to use.
 export HYPERKUBE_IMAGE_REPO=quay.io/coreos/hyperkube
@@ -133,7 +133,8 @@ ExecStart=/usr/lib/coreos/kubelet-wrapper \
   --pod-manifest-path=/etc/kubernetes/manifests \
   --hostname-override=${ADVERTISE_IP} \
   --cluster_dns=${DNS_SERVICE_IP} \
-  --cluster_domain=cluster.local
+  --cluster_domain=cluster.local \
+  --volume-plugin-dir=/etc/kubernetes/volumeplugins
 ExecStop=-/usr/bin/rkt stop --uuid-file=${uuid_file}
 Restart=always
 RestartSec=10
@@ -329,6 +330,7 @@ spec:
     - --leader-elect=true
     - --service-account-private-key-file=/etc/kubernetes/ssl/apiserver-key.pem
     - --root-ca-file=/etc/kubernetes/ssl/ca.pem
+    - --flex-volume-plugin-dir=/etc/kubernetes/volumeplugins
     resources:
       requests:
         cpu: 200m
@@ -346,6 +348,9 @@ spec:
     - mountPath: /etc/ssl/certs
       name: ssl-certs-host
       readOnly: true
+    - mountPath: /etc/kubernetes/volumeplugins
+      name: volumeplugins-host
+      readonly: false
   hostNetwork: true
   volumes:
   - hostPath:
@@ -354,6 +359,9 @@ spec:
   - hostPath:
       path: /usr/share/ca-certificates
     name: ssl-certs-host
+  - hostPath:
+      path: /etc/kubernetes/volumeplugins
+    name: volumeplugins-host
 EOF
     fi
 
@@ -916,7 +924,7 @@ spec:
         # container programs network policy and routes on each
         # host.
         - name: calico-node
-          image: quay.io/calico/node:v1.2.0
+          image: quay.io/calico/node:v2.4.1
           env:
             # The location of the Calico etcd cluster.
             - name: ETCD_ENDPOINTS
@@ -949,7 +957,7 @@ spec:
         # This container installs the Calico CNI binaries
         # and CNI network config file on each node.
         - name: install-cni
-          image: quay.io/calico/cni:v1.5.2
+          image: quay.io/calico/cni:v1.10.0
           imagePullPolicy: Always
           command: ["/install-cni.sh"]
           env:
@@ -1023,7 +1031,7 @@ spec:
       hostNetwork: true
       containers:
         - name: calico-policy-controller
-          image: calico/kube-policy-controller:v0.4.0
+          image: calico/kube-policy-controller:v0.7.0
           env:
             # The location of the Calico etcd cluster.
             - name: ETCD_ENDPOINTS
@@ -1067,9 +1075,13 @@ function start_addons {
 }
 
 function start_calico {
-    echo "Waiting for Kubernetes API..."
-    # wait for the API
+    echo "Waiting for Kubernetes API and extensions..."
+    # wait for the API and extensions such as daemonset
     until curl --silent "http://127.0.0.1:8080/version/"
+    do
+        sleep 5
+    done
+    until curl --silent "http://127.0.0.1:8080/apis/extensions/v1beta1" | grep daemonset
     do
         sleep 5
     done
