@@ -1,4 +1,92 @@
+<#
+.SYNOPSIS
+Deploy a Kubernetes Cluster running on CoreOS Container Linux to a VMware vSphere Infrastructure.
+
+.DESCRIPTION
+The "Install-K8sCluster" command aims to deploy a fully design compliant Kubernetes Cluster running CoreOS Container Linux to a single VMware vSphere host or cluster.
+The deployment procedure handles programmatically the creation of the following platform components.
+
+1. Etcd host(s) for service discovery
+2. Kubernetes Controller host(s) for cluster management
+3. Kubernetes Worker node(s) for container execution
+
+.PARAMETER VMhost
+Specifies the host on which you want to create the CoreOS Container Linux virtual machines.
+
+.PARAMETER Cluster
+Specifies the Cluster on which you want to create to CoreOS Container Linux virtual machines.
+
+.PARAMETER PortGroup
+Specifies the default virtual port-group to allocate to all CoreOS Container Linux virtual machines.
+i.e. ETCd, Kubernetes Controller and Kubernetes Worker.
+
+.PARAMETER Datastore
+Specifies the default datastore to allocate to all CoreOS Container Linux virtual machines.
+i.e. ETCd, Kubernetes Controller and Kubernetes Worker.
+
+.PARAMETER DiskStorageFormat
+Specifies te default storage format configurer on all CoreOS Container Linux virtual machines disks.
+
+.PARAMETER UpdateChannel
+Specifies the operating system release used to create the CoreOS Container Linux virtual machines.
+i.e. 'stable', 'beta', 'alpha'
+
+Caution : 'alpha' channel Docker version is not yet supported by Kubernetes. 
+
+.PARAMETER SSHUser
+Specifies the user name used to open SSH sessions to Core Container Linux hots.
+
+.PARAMETER SSHPassword
+Specifies the user password used to open SSH sessions to Core Container Linux hots.
+
+.PARAMETER DnsServer
+Specifies the list of DNS Server to be configured in the host ip configuration.
+
+.PARAMETER ControllerClusterIP
+Specifies the Kubernetes controller cluster IP
+
+.PARAMETER ControllerEndPoint
+Specifies the Controller end-point URL.
+Typically load balancer/reverse-proxy w/o ssl offloading or DNS host A record(s)
+e.g https://k8s.example.com
+
+.PARAMETER EtcdNamePrefix
+Specifies the prefix ETCd virtual machine names and hostnames.
+Naming convention: <prefix><nnn>
+Result:            etc001,etc002,etc003
+
+.PARAMETER EtcdPortGroup
+Specifies the vSphere virtual port-group allocated to ETCd virtual machines.
+
+.PARAMETER EtcdDatastore
+Specifies the vSphere datastore allocated to ETCd virtual machines.
+The default behavior is to store all etcd hosts.
+It is recommended to redistribute them in seperated datastore using storage vmotion to enhance fault tolerance.
+
+.PARAMETER EtcdCount
+Specifies the number of ETCd virtual machine to deploy
+
+.PARAMETER EtcdVMMemory
+Specifies the amount of RAM to allocated to ETCd virtual machines.
+
+.PARAMETER EtcdVMCpu
+Specifies the amount of CPU to allocated to ETCd virtual machines.
+
+.PARAMETER EtcdSubnet
+Specifies the Subnet allocated to ETCd hosts.
+
+.PARAMETER EtcdCIDR
+Specifies the network mask CIDR of ETCd subnet.
+
+.PARAMETER EtcdStartFrom
+Specifies the number where the ip address generation starts for ETCd host.
+
+.PARAMETER EtcdGateway
+Specifies the default gateway ip address of ETCd hosts.
+
+#>
 PARAM(
+    # vSphere Common Spec
     [parameter(mandatory=$false)][String]$VMHost,
     [parameter(mandatory=$false)][String]$Cluster ='Cluster-Prod',
     [parameter(mandatory=$false)][String]$PortGroup = 'fre-server',
@@ -6,6 +94,22 @@ PARAM(
     [parameter(mandatory=$false)][String]$DiskStorageFormat = 'thin',
 
     [parameter(mandatory=$false)][String]$UpdateChannel = 'stable',
+
+    # CoreOS Remote user
+    [parameter(mandatory=$false)][String]$SSHUser = 'core',
+    [parameter(mandatory=$false)][String]$SSHPassword,
+
+    # CoreOS host dns records
+    [parameter(mandatory=$false)][string[]]$DnsServer = @(
+        '192.168.1.1';
+        '192.168.1.2'
+    ),
+
+    # Controller cluster IP
+    [parameter(mandatory=$false)][String]$ControllerClusterIP = '10.3.0.1',
+
+    # Controller Endpoint
+    [parameter(mandatory=$false)][String]$ControllerEndPoint,
 
     # Etcd configuration
     [parameter(mandatory=$false)][String]$EtcdNamePrefix = 'etcd',
@@ -44,25 +148,7 @@ PARAM(
     [parameter(mandatory=$false)][Int]$WorkerCIDR = 24,
     [parameter(mandatory=$false)][Int]$WorkerStartFrom = 200,
     [parameter(mandatory=$false)][String]$WorkerGateway = '192.168.251.254',
-    [parameter(mandatory=$false)][string[]]$ControllerHardDisk = @(4GB ; 8GB ; 16GB),
-
-    # CoreOS Remote user
-    [parameter(mandatory=$false)][String]$SSHUser = 'core',
-    [parameter(mandatory=$false)][String]$SSHPassword,
-
-    # CoreOS host dns records
-    [parameter(mandatory=$false)][string[]]$DnsServer = @(
-        '192.168.1.1';
-        '192.168.1.2'
-    ),
-
-    # Controller cluster IP
-    [parameter(mandatory=$false)][String]$ControllerClusterIP = '10.3.0.1',
-
-    # Controller Endpoint 
-    # Typically load balancer/reverse-proxy without ssl offloading or DNS host record(s)
-    # e.g https://k8s.example.com
-    [parameter(mandatory=$false)][String]$ControllerEndPoint
+    [parameter(mandatory=$false)][string[]]$ControllerHardDisk = @(4GB ; 8GB ; 16GB)
 )
 BEGIN{
     Set-StrictMode -Version 5
