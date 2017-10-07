@@ -5,10 +5,12 @@ PARAM(
     [parameter(mandatory=$false)][String]$Datastore = 'FAS01_PROD_SATA_04',
     [parameter(mandatory=$false)][String]$DiskStorageFormat = 'thin',
 
-    [parameter(mandatory=$false)][String]$UpdateChannel = 'beta',
+    [parameter(mandatory=$false)][String]$UpdateChannel = 'stable',
 
     # Etcd configuration
     [parameter(mandatory=$false)][String]$EtcdNamePrefix = 'etcd',
+    [parameter(mandatory=$false)][String]$EtcdPortgroup = $PortGroup,
+    [parameter(mandatory=$false)][String]$EtcdDatastore = $Datastore,
     [parameter(mandatory=$false)][Int]$EtcdCount = 1,
     [parameter(mandatory=$false)][Int]$EtcdVMMemory = 512,
     [parameter(mandatory=$false)][Int]$EtcdVMCpu = 1,
@@ -17,8 +19,11 @@ PARAM(
     [parameter(mandatory=$false)][Int]$EtcdStartFrom = 50,
     [parameter(mandatory=$false)][String]$EtcdGateway = '192.168.251.254',
 
+
     # Kubernetes Controller configuration
     [parameter(mandatory=$false)][String]$ControllerNamePrefix = 'ctrl',
+    [parameter(mandatory=$false)][String]$ControllerPortGroup = $PortGroup,
+    [parameter(mandatory=$false)][String]$ControllerDatastore = $Datastore,
     [parameter(mandatory=$false)][Int]$ControllerCount = 1,
     [parameter(mandatory=$false)][Int]$ControllerVMMemory = 1024,
     [parameter(mandatory=$false)][Int]$ControllerVMCpu = 1,
@@ -26,9 +31,12 @@ PARAM(
     [parameter(mandatory=$false)][Int]$ControllerCIDR = 24,
     [parameter(mandatory=$false)][Int]$ControllerStartFrom = 100,
     [parameter(mandatory=$false)][String]$ControllerGateway = '192.168.251.254',
+    [parameter(mandatory=$false)][string[]]$ControllerHardDisk = @(2GB ; 4GB ; 6GB),
 
     # Kubernetes Worker configuration
     [parameter(mandatory=$false)][String]$WorkerNamePrefix = 'wrkr',
+    [parameter(mandatory=$false)][String]$WorkerPortGroup = $PortGroup,
+    [parameter(mandatory=$false)][String]$WorkerDatastore = $Datastore,
     [parameter(mandatory=$false)][Int]$WorkerCount = 1,
     [parameter(mandatory=$false)][Int]$WorkerVMMemory = 1024,
     [parameter(mandatory=$false)][Int]$WorkerVMCpu = 1,
@@ -36,13 +44,7 @@ PARAM(
     [parameter(mandatory=$false)][Int]$WorkerCIDR = 24,
     [parameter(mandatory=$false)][Int]$WorkerStartFrom = 200,
     [parameter(mandatory=$false)][String]$WorkerGateway = '192.168.251.254',
-
-    # Disk configuration in GB
-    [parameter(mandatory=$false)][string[]]$HardDisk = @(
-        4GB ;
-        5GB ;
-        6GB
-    ),
+    [parameter(mandatory=$false)][string[]]$ControllerHardDisk = @(4GB ; 8GB ; 16GB),
 
     # CoreOS Remote user
     [parameter(mandatory=$false)][String]$SSHUser = 'core',
@@ -174,7 +176,7 @@ PROCESS{
         New-K8sEtcdCluster -VMhost $VMHost -MemoryMB $EtcdVMMemory -numCPU $EtcdVMCpu `
         -Subnet $EtcdSubnet -CIDR $EtcdCIDR -Gateway $EtcdGateway -DNS $DnsServer `
         -StartFrom $EtcdStartFrom -Count $EtcdCount -NamePrefix $EtcdNamePrefix `
-        -DataStore $Datastore -PortGroup $PortGroup -DiskstorageFormat $DiskStorageFormat `
+        -DataStore $EtcdDatastore -PortGroup $EtcdPortGroup -DiskstorageFormat $DiskStorageFormat `
         -CloudConfigFile $EtcdCloudConfigFile -SSHPublicKeyFile $SSHKey[1].FullName
     }
     ElseIf($Cluster)
@@ -182,7 +184,7 @@ PROCESS{
         New-K8sEtcdCluster -Cluster $Cluster -MemoryMB $EtcdVMMemory -numCPU $EtcdVMCpu `
         -Subnet $EtcdSubnet -CIDR $EtcdCIDR -Gateway $EtcdGateway -DNS $DnsServer `
         -StartFrom $EtcdStartFrom -Count $EtcdCount -NamePrefix $EtcdNamePrefix `
-        -DataStore $Datastore -PortGroup $PortGroup -DiskstorageFormat $DiskStorageFormat `
+        -DataStore $EtcdDatastore -PortGroup $EtcdPortGroup -DiskstorageFormat $DiskStorageFormat `
         -CloudConfigFile $EtcdCloudConfigFile -SSHPublicKeyFile $SSHPublicKeyFile
     }
 
@@ -191,20 +193,20 @@ PROCESS{
 
     if($VMHost)
     {
-        New-K8sControllerCluster -VMhost $VMHost -MemoryMB $ControllerVMMemory -numCPU $ControllerVMCpu -HardDisk $HardDisk `
+        New-K8sControllerCluster -VMhost $VMHost -MemoryMB $ControllerVMMemory -numCPU $ControllerVMCpu -HardDisk $ControllerHardDisk `
         -Subnet $ControllerSubnet -CIDR $ControllerCIDR -Gateway $ControllerGateway -DNS $DnsServer `
         -StartFrom $ControllerStartFrom -Count $ControllerCount -NamePrefix $ControllerNamePrefix `
-        -DataStore $Datastore -PortGroup $PortGroup -DiskstorageFormat $DiskStorageFormat `
+        -DataStore $ControllerDatastore -PortGroup $ControllerPortGroup -DiskstorageFormat $DiskStorageFormat `
         -CloudConfigFile $ControllerCloudConfigFile -InstallScript $ControllerCloudConfigPath `
         -EtcdEndpoints $EtcdEndpoints -ControllerCluster $ControllerClusterIP -ControllerEndpoint $ControllerEndpoint `
         -SSHCredential $SSHCredential -SSHPrivateKeyFile $SSHPrivateKeyFile -SSHPublicKeyFile $SSHPublicKeyFile
     }
     ElseIf($Cluster)
     {
-        New-K8sControllerCluster -Cluster $Cluster -MemoryMB $ControllerVMMemory -numCPU $ControllerVMCpu -HardDisk $HardDisk `
+        New-K8sControllerCluster -Cluster $Cluster -MemoryMB $ControllerVMMemory -numCPU $ControllerVMCpu -HardDisk $ContorllerHardDisk `
         -Subnet $ControllerSubnet -CIDR $ControllerCIDR -Gateway $ControllerGateway -DNS $DnsServer `
         -StartFrom $ControllerStartFrom -Count $ControllerCount -NamePrefix $ControllerNamePrefix `
-        -DataStore $Datastore -PortGroup $PortGroup -DiskstorageFormat $DiskStorageFormat `
+        -DataStore $ControllerDatastore -PortGroup $ControllerPortGroup -DiskstorageFormat $DiskStorageFormat `
         -CloudConfigFile $ControllerCloudConfigFile -InstallScript $ControllerCloudConfigPath `
         -EtcdEndpoints $EtcdEndpoints -ControllerCluster $ControllerClusterIP -ControllerEndpoint $ControllerEndpoint `
         -SSHCredential $SSHCredential -SSHPrivateKeyFile $SSHPrivateKeyFile -SSHPublicKeyFile $SSHPublicKeyFile
@@ -214,10 +216,10 @@ PROCESS{
     ##################################################
     if($VMHost)
     {
-        New-K8sWorkerCluster -VMhost $VMHost -MemoryMB $WorkerVMMemory -numCPU $WorkerVMCpu -HardDisk $HardDisk `
+        New-K8sWorkerCluster -VMhost $VMHost -MemoryMB $WorkerVMMemory -numCPU $WorkerVMCpu -HardDisk $WorkderHardDisk `
         -Subnet $WorkerSubnet -CIDR $WorkerCIDR -Gateway $WorkerGateway -DNS $DnsServer `
         -StartFrom $WorkerStartFrom -Count $WorkerCount -NamePrefix $WorkerNamePrefix `
-        -DataStore $Datastore -PortGroup $PortGroup -DiskstorageFormat $DiskStorageFormat `
+        -DataStore $WorkerDatastore -PortGroup $WorkerPortGroup -DiskstorageFormat $DiskStorageFormat `
         -CloudConfigFile $WorkerCloudConfigFile -InstallScript $WorkerCloudConfigPath `
         -EtcdEndpoints $EtcdEndpoints -ControllerEndpoint $ControllerEndpoint `
         -SSHCredential $SSHCredential -SSHPrivateKeyFile $SSHPrivateKeyFile -SSHPublicKeyFile $SSHPublicKeyFile
@@ -227,7 +229,7 @@ PROCESS{
         New-K8sWorkerCluster -Cluster $Cluster -MemoryMB $WorkerVMMemory -numCPU $WorkerVMCpu -HardDisk $HardDisk `
         -Subnet $WorkerSubnet -CIDR $WorkerCIDR -Gateway $WorkerGateway -DNS $DnsServer `
         -StartFrom $WorkerStartFrom -Count $WorkerCount -NamePrefix $WorkerNamePrefix `
-        -DataStore $Datastore -PortGroup $PortGroup -DiskstorageFormat $DiskStorageFormat `
+        -DataStore $WorkerDatastore -PortGroup $WorkerPortGroup -DiskstorageFormat $DiskStorageFormat `
         -CloudConfigFile $WorkerCloudConfigFile -InstallScript $WorkerCloudConfigPath `
         -EtcdEndpoints $EtcdEndpoints -ControllerEndpoint $ControllerEndpoint `
         -SSHCredential $SSHCredential -SSHPrivateKeyFile $SSHPrivateKeyFile -SSHPublicKeyFile $SSHPublicKeyFile
