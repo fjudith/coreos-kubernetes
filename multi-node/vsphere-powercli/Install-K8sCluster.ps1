@@ -118,6 +118,9 @@ Specifies the number where the ip address generation starts for Kubernetes Contr
 .PARAMETER ControllerGateway
 Specifies the default gateway ip address of Kubernetes Controller hosts.
 
+.PARAMETER ControllerHardisk
+Specifies an array of disk spaces related to the additional hard disk to be added to the Kubernetes Controller hosts.
+
 .PARAMETER WorkerNamePrefix
 Specifies the prefix Kubernetes Worker virtual machine names and hostnames.
 Naming convention: <prefix><nnn>
@@ -151,6 +154,10 @@ Specifies the number where the ip address generation starts for Kubernetes Worke
 
 .PARAMETER WorkerGateway
 Specifies the default gateway ip address of Kubernetes Worker hosts.
+
+.PARAMETER WorkerHardisk
+Specifies an array of disk spaces related to the additional hard disk to be added to the Kubernetes Worker hosts.
+
 #>
 PARAM(
     # vSphere Common Spec
@@ -205,7 +212,7 @@ PARAM(
     [parameter(mandatory=$false)][string[]]$ControllerHardDisk = @(2GB ; 4GB ; 6GB),
 
     # Kubernetes Worker configuration
-    [parameter(mandatory=$false)][String]$WorkerNamePrefix = 'wrkr',
+    [parameter(mandatory=$false)][String]$WorkerNamePrefix = 'work',
     [parameter(mandatory=$false)][String]$WorkerPortGroup = $PortGroup,
     [parameter(mandatory=$false)][String]$WorkerDatastore = $Datastore,
     [parameter(mandatory=$false)][Int]$WorkerCount = 1,
