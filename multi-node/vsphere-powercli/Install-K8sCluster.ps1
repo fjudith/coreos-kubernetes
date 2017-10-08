@@ -53,7 +53,7 @@ e.g https://k8s.example.com
 .PARAMETER EtcdNamePrefix
 Specifies the prefix ETCd virtual machine names and hostnames.
 Naming convention: <prefix><nnn>
-Result:            etc001,etc002,etc003
+Result:            etcd001,etcd002,etcd003
 
 .PARAMETER EtcdPortGroup
 Specifies the vSphere virtual port-group allocated to ETCd virtual machines.
@@ -84,6 +84,73 @@ Specifies the number where the ip address generation starts for ETCd host.
 .PARAMETER EtcdGateway
 Specifies the default gateway ip address of ETCd hosts.
 
+.PARAMETER ControllerNamePrefix
+Specifies the prefix Kubernetes Controller virtual machine names and hostnames.
+Naming convention: <prefix><nnn>
+Result:            ctrl001,ctrl002,ctrl003
+
+.PARAMETER ControllerPortGroup
+Specifies the vSphere virtual port-group allocated to Kubernetes Controller virtual machines.
+
+.PARAMETER ControllerDatastore
+Specifies the vSphere datastore allocated to Kubernetes Controller virtual machines.
+The default behavior is to store all etcd hosts.
+It is recommended to redistribute them in seperated datastore using storage vmotion to enhance fault tolerance.
+
+.PARAMETER ControllerCount
+Specifies the number of Kubernetes Controler virtual machine to deploy
+
+.PARAMETER ControllerVMMemory
+Specifies the amount of RAM to allocated to Kubernetes Controller virtual machines.
+
+.PARAMETER ControllerVMCpu
+Specifies the amount of CPU to allocated to Kubernetes Controller virtual machines.
+
+.PARAMETER ControllerSubnet
+Specifies the Subnet allocated to Kubernetes Controller hosts.
+
+.PARAMETER ControllerCIDR
+Specifies the network mask CIDR of Kubernetes Controller subnet.
+
+.PARAMETER ControllerStartFrom
+Specifies the number where the ip address generation starts for Kubernetes Controller host.
+
+.PARAMETER ControllerGateway
+Specifies the default gateway ip address of Kubernetes Controller hosts.
+
+.PARAMETER WorkerNamePrefix
+Specifies the prefix Kubernetes Worker virtual machine names and hostnames.
+Naming convention: <prefix><nnn>
+Result:            work001,work002,work003
+
+.PARAMETER WorkerPortGroup
+Specifies the vSphere virtual port-group allocated to Kubernetes Worker virtual machines.
+
+.PARAMETER WorkerDatastore
+Specifies the vSphere datastore allocated to Kubernetes Worker virtual machines.
+The default behavior is to store all etcd hosts.
+It is recommended to redistribute them in seperated datastore using storage vmotion to enhance fault tolerance.
+
+.PARAMETER WorkerCount
+Specifies the number of Kubernetes Worker virtual machine to deploy
+
+.PARAMETER WorkerVMMemory
+Specifies the amount of RAM to allocated to Kubernetes Worker virtual machines.
+
+.PARAMETER WorkerVMCpu
+Specifies the amount of CPU to allocated to Kubernetes Worker virtual machines.
+
+.PARAMETER WorkerSubnet
+Specifies the Subnet allocated to Kubernetes Worker hosts.
+
+.PARAMETER WorkerCIDR
+Specifies the network mask CIDR of Kubernetes Worker subnet.
+
+.PARAMETER WorkerStartFrom
+Specifies the number where the ip address generation starts for Kubernetes Worker host.
+
+.PARAMETER WorkerGateway
+Specifies the default gateway ip address of Kubernetes Worker hosts.
 #>
 PARAM(
     # vSphere Common Spec
