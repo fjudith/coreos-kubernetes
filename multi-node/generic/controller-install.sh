@@ -22,7 +22,7 @@ export AUTOSCALER_VER=1.0.0
 
 export HEAPSTER_IMAGE_REPO=gcr.io/google_containers/heapster:v1.2.0
 
-export HEAPSTSER_VER=v1.2.0
+export HEAPSTER_VER=v1.2.0
 
 export DASHBOARD_IMAGE_REPO=gcr.io/google_containers/kubernetes-dashboard-amd64
 
