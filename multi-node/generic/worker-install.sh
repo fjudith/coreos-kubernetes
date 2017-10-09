@@ -10,7 +10,7 @@ export ETCD_ENDPOINTS=
 export CONTROLLER_ENDPOINT=
 
 # Specify the version (vX.Y.Z) of Kubernetes assets to deploy
-export K8S_VER=v1.5.4_coreos.0
+export K8S_VER=v1.7.5_coreos.1
 
 # Hyperkube image repository to use.
 export HYPERKUBE_IMAGE_REPO=quay.io/coreos/hyperkube
@@ -104,6 +104,7 @@ ExecStartPre=-/usr/bin/rkt rm --uuid-file=${uuid_file}
 ExecStartPre=/usr/bin/mkdir -p /opt/cni/bin
 ExecStart=/usr/lib/coreos/kubelet-wrapper \
   --kubeconfig=/etc/kubernetes/worker-kubeconfig.yaml \
+  --require-kubeconfig \
   --cni-conf-dir=/etc/kubernetes/cni/net.d \
   --network-plugin=cni \
   --container-runtime=${CONTAINER_RUNTIME} \
@@ -134,7 +135,7 @@ kind: Config
 clusters:
 - name: local
   cluster:
-    server: ${MASTER_HOST}
+    server: ${CONTROLLER_ENDPOINT}
     certificate-authority: /etc/kubernetes/ssl/ca.pem
 users:
 - name: kubelet
@@ -163,6 +164,8 @@ EOF
 # through the api-server. Related issue:
 # https://github.com/coreos/rkt/issues/2878
 exec nsenter -m -u -i -n -p -t 1 -- /usr/bin/rkt "\$@"
+EOF
+
     diff_content $TEMPLATE "$CONTENT"
 
     local TEMPLATE=/etc/systemd/system/load-rkt-stage1.service
