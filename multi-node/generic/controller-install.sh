@@ -151,6 +151,7 @@ ExecStartPre=/usr/bin/mkdir -p /opt/cni/bin
 ExecStartPre=/usr/bin/mkdir -p /var/log/containers
 ExecStartPre=-/usr/bin/rkt rm --uuid-file=${uuid_file}
 ExecStart=/usr/lib/coreos/kubelet-wrapper \
+  --kubeconfig=/etc/kubernetes/master-kubeconfig.yaml \
   --register-schedulable=false \
   --cni-conf-dir=/etc/kubernetes/cni/net.d \
   --network-plugin=cni \
@@ -159,7 +160,7 @@ ExecStart=/usr/lib/coreos/kubelet-wrapper \
   --rkt-stage1-image=coreos.com/rkt/stage1-coreos \
   --allow-privileged=true \
   --pod-manifest-path=/etc/kubernetes/manifests \
-  --hostname-override=$(hostname) \
+  --hostname-override=${ADVERTISE_IP} \
   --cluster_dns=${DNS_SERVICE_IP} \
   --cluster_domain=cluster.local
 ExecStop=-/usr/bin/rkt stop --uuid-file=${uuid_file}
@@ -168,6 +169,26 @@ RestartSec=10
 
 [Install]
 WantedBy=multi-user.target
+EOF
+    diff_content $TEMPLATE "$CONTENT"
+
+    local TEMPLATE=/etc/kubernetes/master-kubeconfig.yaml
+    read -d '' local CONTENT << EOF || true 
+#
+apiVersion: v1
+kind: Config
+clusters:
+- name: local
+  cluster:
+    server: http://127.0.0.1:8080
+users:
+- name: kubelet
+contexts:
+- context:
+    cluster: local
+    user: kubelet
+  name: kubelet-context
+current-context: kubelet-context
 EOF
     diff_content $TEMPLATE "$CONTENT"
 

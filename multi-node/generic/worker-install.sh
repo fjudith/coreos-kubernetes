@@ -103,7 +103,7 @@ ExecStartPre=/usr/bin/mkdir -p /var/log/containers
 ExecStartPre=-/usr/bin/rkt rm --uuid-file=${uuid_file}
 ExecStartPre=/usr/bin/mkdir -p /opt/cni/bin
 ExecStart=/usr/lib/coreos/kubelet-wrapper \
-  --api-servers=${CONTROLLER_ENDPOINT} \
+  --kubeconfig=/etc/kubernetes/worker-kubeconfig.yaml \
   --cni-conf-dir=/etc/kubernetes/cni/net.d \
   --network-plugin=cni \
   --container-runtime=${CONTAINER_RUNTIME} \
@@ -112,10 +112,9 @@ ExecStart=/usr/lib/coreos/kubelet-wrapper \
   --register-node=true \
   --allow-privileged=true \
   --pod-manifest-path=/etc/kubernetes/manifests \
-  --hostname-override=$(hostname) \
+  --hostname-override=${ADVERTISE_IP} \
   --cluster_dns=${DNS_SERVICE_IP} \
   --cluster_domain=cluster.local \
-  --kubeconfig=/etc/kubernetes/worker-kubeconfig.yaml \
   --tls-cert-file=/etc/kubernetes/ssl/worker.pem \
   --tls-private-key-file=/etc/kubernetes/ssl/worker-key.pem
 ExecStop=-/usr/bin/rkt stop --uuid-file=${uuid_file}
@@ -124,6 +123,30 @@ RestartSec=10
 
 [Install]
 WantedBy=multi-user.target
+EOF
+    diff_content $TEMPLATE "$CONTENT"
+
+    local TEMPLATE=/etc/kubernetes/worker-kubeconfig.yaml
+    read -d '' local CONTENT << EOF || true
+#
+apiVersion: v1
+kind: Config
+clusters:
+- name: local
+  cluster:
+    server: ${MASTER_HOST}
+    certificate-authority: /etc/kubernetes/ssl/ca.pem
+users:
+- name: kubelet
+  user:
+    client-certificate: /etc/kubernetes/ssl/worker.pem
+    client-key: /etc/kubernetes/ssl/worker-key.pem
+contexts:
+- context:
+    cluster: local
+    user: kubelet
+  name: kubelet-context
+current-context: kubelet-context
 EOF
     diff_content $TEMPLATE "$CONTENT"
 
