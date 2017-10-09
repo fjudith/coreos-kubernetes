@@ -205,29 +205,6 @@ EOF
       diff_content $TEMPLATE "$CONTENT"
     fi
 
-    local TEMPLATE=/etc/kubernetes/worker-kubeconfig.yaml
-    read -d '' local CONTENT << EOF || true
-#
-apiVersion: v1
-kind: Config
-clusters:
-- name: local
-  cluster:
-    certificate-authority: /etc/kubernetes/ssl/ca.pem
-users:
-- name: kubelet
-  user:
-    client-certificate: /etc/kubernetes/ssl/worker.pem
-    client-key: /etc/kubernetes/ssl/worker-key.pem
-contexts:
-- context:
-    cluster: local
-    user: kubelet
-  name: kubelet-context
-current-context: kubelet-context
-EOF
-    diff_content $TEMPLATE "$CONTENT"
-
     local TEMPLATE=/etc/kubernetes/manifests/kube-proxy.yaml
     read -d '' local CONTENT << EOF || true
 #
