@@ -5,10 +5,30 @@ set -e
 export ETCD_ENDPOINTS=
 
 # Specify the version (vX.Y.Z) of Kubernetes assets to deploy
-export K8S_VER=v1.5.4_coreos.0
+export K8S_VER=v1.7.5_coreos.0
 
 # Hyperkube image repository to use.
 export HYPERKUBE_IMAGE_REPO=quay.io/coreos/hyperkube
+
+# Specify the version of kubedns
+export DNS_VER=1.9
+
+# kubedns image repository to use 
+export KUBEDNS_IMAGE_REPO=gcr.io/google_containers/kubedns-amd64
+
+export AUTOSCALER_IMAGE_REPO=gcr.io/google_containers/cluster-proportional-autoscaler-amd64
+
+export AUTOSCALER_VER=1.0.0
+
+export HEAPSTER_IMAGE_REPO=gcr.io/google_containers/heapster:v1.2.0
+
+export HEAPSTSER_VER=v1.2.0
+
+export DASHBOARD_IMAGE_REPO=gcr.io/google_containers/kubernetes-dashboard-amd64
+
+export DASHBOARD_VER=v1.5.0
+
+
 
 # The CIDR network to use for pod IPs.
 # Each pod launched in the cluster will be assigned an IP out of this range.
@@ -90,14 +110,27 @@ function init_flannel {
         echo "Unexpected error configuring flannel pod network: $RES"
     fi
 }
+function diff_content {
+  local TEMPLATE=$1
+  local CONTENT=$2
+  if [ -f $TEMPLATE ]; then
+    if [[ $(diff $TEMPLATE <(echo -e "$CONTENT") > /dev/null; echo $?) != 0 ]];
+      then
+      echo "TEMPLATE: $TEMPLATE"
+      echo -e "$CONTENT" > $TEMPLATE
+    fi
+  else
+    mkdir -p $(dirname $TEMPLATE)
+    echo "TEMPLATE: $TEMPLATE"
+    echo -e "$CONTENT" > $TEMPLATE
+  fi
+}
 
 function init_templates {
     local TEMPLATE=/etc/systemd/system/kubelet.service
     local uuid_file="/var/run/kubelet-pod.uuid"
-    if [ ! -f $TEMPLATE ]; then
-        echo "TEMPLATE: $TEMPLATE"
-        mkdir -p $(dirname $TEMPLATE)
-        cat << EOF > $TEMPLATE
+    read -d '' local CONTENT << EOF || true 
+#
 [Service]
 Environment=KUBELET_IMAGE_TAG=${K8S_VER}
 Environment=KUBELET_IMAGE_URL=${HYPERKUBE_IMAGE_REPO}
@@ -118,7 +151,6 @@ ExecStartPre=/usr/bin/mkdir -p /opt/cni/bin
 ExecStartPre=/usr/bin/mkdir -p /var/log/containers
 ExecStartPre=-/usr/bin/rkt rm --uuid-file=${uuid_file}
 ExecStart=/usr/lib/coreos/kubelet-wrapper \
-  --kubeconfig=/etc/kubernetes/master-kubeconfig.yaml \
   --register-schedulable=false \
   --cni-conf-dir=/etc/kubernetes/cni/net.d \
   --network-plugin=cni \
@@ -127,7 +159,7 @@ ExecStart=/usr/lib/coreos/kubelet-wrapper \
   --rkt-stage1-image=coreos.com/rkt/stage1-coreos \
   --allow-privileged=true \
   --pod-manifest-path=/etc/kubernetes/manifests \
-  --hostname-override=${ADVERTISE_IP} \
+  --hostname-override=$(hostname) \
   --cluster_dns=${DNS_SERVICE_IP} \
   --cluster_domain=cluster.local
 ExecStop=-/usr/bin/rkt stop --uuid-file=${uuid_file}
@@ -137,13 +169,11 @@ RestartSec=10
 [Install]
 WantedBy=multi-user.target
 EOF
-    fi
+    diff_content $TEMPLATE "$CONTENT"
 
     local TEMPLATE=/opt/bin/host-rkt
-    if [ ! -f $TEMPLATE ]; then
-        echo "TEMPLATE: $TEMPLATE"
-        mkdir -p $(dirname $TEMPLATE)
-        cat << EOF > $TEMPLATE
+    read -d '' local CONTENT << EOF || true 
+#
 #!/bin/sh
 # This is bind mounted into the kubelet rootfs and all rkt shell-outs go
 # through this rkt wrapper. It essentially enters the host mount namespace
@@ -155,14 +185,11 @@ EOF
 # https://github.com/coreos/rkt/issues/2878
 exec nsenter -m -u -i -n -p -t 1 -- /usr/bin/rkt "\$@"
 EOF
-    fi
-
+    diff_content $TEMPLATE "$CONTENT"
 
     local TEMPLATE=/etc/systemd/system/load-rkt-stage1.service
-    if [ ${CONTAINER_RUNTIME} = "rkt" ] && [ ! -f $TEMPLATE ]; then
-        echo "TEMPLATE: $TEMPLATE"
-        mkdir -p $(dirname $TEMPLATE)
-        cat << EOF > $TEMPLATE
+    read -d '' local CONTENT << EOF || true 
+#
 [Unit]
 Description=Load rkt stage1 images
 Documentation=http://github.com/coreos/rkt
@@ -178,13 +205,13 @@ ExecStart=/usr/bin/rkt fetch /usr/lib/rkt/stage1-images/stage1-coreos.aci /usr/l
 [Install]
 RequiredBy=rkt-api.service
 EOF
+    if [ ${CONTAINER_RUNTIME} = "rkt" ]; then
+      diff_content $TEMPLATE "$CONTENT"
     fi
 
     local TEMPLATE=/etc/systemd/system/rkt-api.service
-    if [ ${CONTAINER_RUNTIME} = "rkt" ] && [ ! -f $TEMPLATE ]; then
-        echo "TEMPLATE: $TEMPLATE"
-        mkdir -p $(dirname $TEMPLATE)
-        cat << EOF > $TEMPLATE
+    read -d '' local CONTENT << EOF || true 
+#
 [Unit]
 Before=kubelet.service
 
@@ -196,35 +223,14 @@ RestartSec=10
 [Install]
 RequiredBy=kubelet.service
 EOF
-    fi
 
-    local TEMPLATE=/etc/kubernetes/master-kubeconfig.yaml
-    if [ ! -f $TEMPLATE ]; then
-        echo "TEMPLATE: $TEMPLATE"
-        mkdir -p $(dirname $TEMPLATE)
-        cat << EOF > $TEMPLATE
-apiVersion: v1
-kind: Config
-clusters:
-- name: local
-  cluster:
-    server: http://127.0.0.1:8080
-users:
-- name: kubelet
-contexts:
-- context:
-    cluster: local
-    user: kubelet
-  name: kubelet-context
-current-context: kubelet-context
-EOF
+    if [ ${CONTAINER_RUNTIME} = "rkt" ]; then
+      diff_content $TEMPLATE "$CONTENT"
     fi
 
     local TEMPLATE=/etc/kubernetes/manifests/kube-proxy.yaml
-    if [ ! -f $TEMPLATE ]; then
-        echo "TEMPLATE: $TEMPLATE"
-        mkdir -p $(dirname $TEMPLATE)
-        cat << EOF > $TEMPLATE
+    read -d '' local CONTENT << EOF || true 
+#
 apiVersion: v1
 kind: Pod
 metadata:
@@ -259,13 +265,11 @@ spec:
       path: /var/run/dbus
     name: dbus
 EOF
-    fi
+    diff_content $TEMPLATE "$CONTENT"
 
     local TEMPLATE=/etc/kubernetes/manifests/kube-apiserver.yaml
-    if [ ! -f $TEMPLATE ]; then
-        echo "TEMPLATE: $TEMPLATE"
-        mkdir -p $(dirname $TEMPLATE)
-        cat << EOF > $TEMPLATE
+    read -d '' local CONTENT << EOF || true 
+#
 apiVersion: v1
 kind: Pod
 metadata:
@@ -321,13 +325,11 @@ spec:
       path: /usr/share/ca-certificates
     name: ssl-certs-host
 EOF
-    fi
+    diff_content $TEMPLATE "$CONTENT"
 
     local TEMPLATE=/etc/kubernetes/manifests/kube-controller-manager.yaml
-    if [ ! -f $TEMPLATE ]; then
-        echo "TEMPLATE: $TEMPLATE"
-        mkdir -p $(dirname $TEMPLATE)
-        cat << EOF > $TEMPLATE
+    read -d '' local CONTENT << EOF || true 
+#
 apiVersion: v1
 kind: Pod
 metadata:
@@ -370,13 +372,11 @@ spec:
       path: /usr/share/ca-certificates
     name: ssl-certs-host
 EOF
-    fi
+    diff_content $TEMPLATE "$CONTENT"
 
     local TEMPLATE=/etc/kubernetes/manifests/kube-scheduler.yaml
-    if [ ! -f $TEMPLATE ]; then
-        echo "TEMPLATE: $TEMPLATE"
-        mkdir -p $(dirname $TEMPLATE)
-        cat << EOF > $TEMPLATE
+    read -d '' local CONTENT << EOF || true 
+#
 apiVersion: v1
 kind: Pod
 metadata:
@@ -403,13 +403,11 @@ spec:
       initialDelaySeconds: 15
       timeoutSeconds: 15
 EOF
-    fi
+    diff_content $TEMPLATE "$CONTENT"
 
     local TEMPLATE=/srv/kubernetes/manifests/kube-dns-de.yaml
-    if [ ! -f $TEMPLATE ]; then
-        echo "TEMPLATE: $TEMPLATE"
-        mkdir -p $(dirname $TEMPLATE)
-        cat << EOF > $TEMPLATE
+    read -d '' local CONTENT << EOF || true 
+#
 apiVersion: extensions/v1beta1
 kind: Deployment
 metadata:
@@ -436,7 +434,7 @@ spec:
     spec:
       containers:
       - name: kubedns
-        image: gcr.io/google_containers/kubedns-amd64:1.9
+        image: ${KUBEDNS_IMAGE_REPO}:$DNS_VER
         resources:
           limits:
             memory: 170Mi
@@ -549,13 +547,11 @@ spec:
       dnsPolicy: Default
 
 EOF
-    fi
+    diff_content $TEMPLATE "$CONTENT"
 
     local TEMPLATE=/srv/kubernetes/manifests/kube-dns-autoscaler-de.yaml
-    if [ ! -f $TEMPLATE ]; then
-        echo "TEMPLATE: $TEMPLATE"
-        mkdir -p $(dirname $TEMPLATE)
-        cat << EOF > $TEMPLATE
+    read -d '' local CONTENT << EOF || true 
+#
 apiVersion: extensions/v1beta1
 kind: Deployment
 metadata:
@@ -575,7 +571,7 @@ spec:
     spec:
       containers:
       - name: autoscaler
-        image: gcr.io/google_containers/cluster-proportional-autoscaler-amd64:1.0.0
+        image: ${AUTOSCALER_IMAGE_REPO}:$AUTOSCALER_VER
         resources:
             requests:
                 cpu: "20m"
@@ -590,13 +586,11 @@ spec:
           - --logtostderr=true
           - --v=2
 EOF
-    fi
+    diff_content $TEMPLATE "$CONTENT"
 
     local TEMPLATE=/srv/kubernetes/manifests/kube-dns-svc.yaml
-    if [ ! -f $TEMPLATE ]; then
-        echo "TEMPLATE: $TEMPLATE"
-        mkdir -p $(dirname $TEMPLATE)
-        cat << EOF > $TEMPLATE
+    read -d '' local CONTENT << EOF || true 
+#
 apiVersion: v1
 kind: Service
 metadata:
@@ -618,39 +612,37 @@ spec:
     port: 53
     protocol: TCP
 EOF
-    fi
+    diff_content $TEMPLATE "$CONTENT"
 
     local TEMPLATE=/srv/kubernetes/manifests/heapster-de.yaml
-    if [ ! -f $TEMPLATE ]; then
-        echo "TEMPLATE: $TEMPLATE"
-        mkdir -p $(dirname $TEMPLATE)
-        cat << EOF > $TEMPLATE
+    read -d '' local CONTENT << EOF || true 
+#
 apiVersion: extensions/v1beta1
 kind: Deployment
 metadata:
-  name: heapster-v1.2.0
+  name: heapster-$HEAPSTER_VER
   namespace: kube-system
   labels:
     k8s-app: heapster
     kubernetes.io/cluster-service: "true"
-    version: v1.2.0
+    version: $HEAPSTER_VER
 spec:
   replicas: 1
   selector:
     matchLabels:
       k8s-app: heapster
-      version: v1.2.0
+      version: $HEAPSTER_VER
   template:
     metadata:
       labels:
         k8s-app: heapster
-        version: v1.2.0
+        version: $HEAPSTER_VER
       annotations:
         scheduler.alpha.kubernetes.io/critical-pod: ''
         scheduler.alpha.kubernetes.io/tolerations: '[{"key":"CriticalAddonsOnly", "operator":"Exists"}]'
     spec:
       containers:
-        - image: gcr.io/google_containers/heapster:v1.2.0
+        - image: ${HEAPSTER_IMAGE_REPO}:$HEAPSTER_VER
           name: heapster
           livenessProbe:
             httpGet:
@@ -687,18 +679,16 @@ spec:
             - --memory=200Mi
             - --extra-memory=4Mi
             - --threshold=5
-            - --deployment=heapster-v1.2.0
+            - --deployment=heapster-$HEAPSTER_VER
             - --container=heapster
             - --poll-period=300000
             - --estimator=exponential
 EOF
-    fi
+    diff_content $TEMPLATE "$CONTENT"
 
     local TEMPLATE=/srv/kubernetes/manifests/heapster-svc.yaml
-    if [ ! -f $TEMPLATE ]; then
-        echo "TEMPLATE: $TEMPLATE"
-        mkdir -p $(dirname $TEMPLATE)
-        cat << EOF > $TEMPLATE
+    read -d '' local CONTENT << EOF || true 
+#
 kind: Service
 apiVersion: v1
 metadata:
@@ -714,13 +704,11 @@ spec:
   selector:
     k8s-app: heapster
 EOF
-    fi
+    diff_content $TEMPLATE "$CONTENT"
 
     local TEMPLATE=/srv/kubernetes/manifests/kube-dashboard-de.yaml
-    if [ ! -f $TEMPLATE ]; then
-        echo "TEMPLATE: $TEMPLATE"
-        mkdir -p $(dirname $TEMPLATE)
-        cat << EOF > $TEMPLATE
+    read -d '' local CONTENT << EOF || true 
+#
 apiVersion: extensions/v1beta1
 kind: Deployment
 metadata:
@@ -743,7 +731,7 @@ spec:
     spec:
       containers:
       - name: kubernetes-dashboard
-        image: gcr.io/google_containers/kubernetes-dashboard-amd64:v1.5.0
+        image: ${DASHBOARD_IMAGE_REPO}:$DASHBOARD_VER
         resources:
           # keep request = limit to keep this container in guaranteed class
           limits:
@@ -761,13 +749,11 @@ spec:
           initialDelaySeconds: 30
           timeoutSeconds: 30
 EOF
-    fi
+    diff_content $TEMPLATE "$CONTENT"
 
     local TEMPLATE=/srv/kubernetes/manifests/kube-dashboard-svc.yaml
-    if [ ! -f $TEMPLATE ]; then
-        echo "TEMPLATE: $TEMPLATE"
-        mkdir -p $(dirname $TEMPLATE)
-        cat << EOF > $TEMPLATE
+    read -d '' local CONTENT << EOF || true 
+#
 apiVersion: v1
 kind: Service
 metadata:
@@ -783,56 +769,46 @@ spec:
   - port: 80
     targetPort: 9090
 EOF
-    fi
+    diff_content $TEMPLATE "$CONTENT"
 
     local TEMPLATE=/etc/flannel/options.env
-    if [ ! -f $TEMPLATE ]; then
-        echo "TEMPLATE: $TEMPLATE"
-        mkdir -p $(dirname $TEMPLATE)
-        cat << EOF > $TEMPLATE
+    read -d '' local CONTENT << EOF || true 
+#
 FLANNELD_IFACE=$ADVERTISE_IP
 FLANNELD_ETCD_ENDPOINTS=$ETCD_ENDPOINTS
 EOF
-    fi
+    diff_content $TEMPLATE "$CONTENT"
 
     local TEMPLATE=/etc/systemd/system/flanneld.service.d/40-ExecStartPre-symlink.conf.conf
-    if [ ! -f $TEMPLATE ]; then
-        echo "TEMPLATE: $TEMPLATE"
-        mkdir -p $(dirname $TEMPLATE)
-        cat << EOF > $TEMPLATE
+    read -d '' local CONTENT << EOF || true 
+#
 [Service]
 ExecStartPre=/usr/bin/ln -sf /etc/flannel/options.env /run/flannel/options.env
 EOF
-    fi
+    diff_content $TEMPLATE "$CONTENT"
 
     local TEMPLATE=/etc/systemd/system/docker.service.d/40-flannel.conf
-    if [ ! -f $TEMPLATE ]; then
-        echo "TEMPLATE: $TEMPLATE"
-        mkdir -p $(dirname $TEMPLATE)
-        cat << EOF > $TEMPLATE
+    read -d '' local CONTENT << EOF || true 
+#
 [Unit]
 Requires=flanneld.service
 After=flanneld.service
 [Service]
 EnvironmentFile=/etc/kubernetes/cni/docker_opts_cni.env
 EOF
-    fi
+    diff_content $TEMPLATE "$CONTENT"
 
     local TEMPLATE=/etc/kubernetes/cni/docker_opts_cni.env
-    if [ ! -f $TEMPLATE ]; then
-        echo "TEMPLATE: $TEMPLATE"
-        mkdir -p $(dirname $TEMPLATE)
-        cat << EOF > $TEMPLATE
+    read -d '' local CONTENT << EOF || true 
+#
 DOCKER_OPT_BIP=""
 DOCKER_OPT_IPMASQ=""
 EOF
-    fi
+    diff_content $TEMPLATE "$CONTENT"
 
     local TEMPLATE=/etc/kubernetes/cni/net.d/10-flannel.conf
-    if [ "${USE_CALICO}" = "false" ] && [ ! -f "${TEMPLATE}" ]; then
-        echo "TEMPLATE: $TEMPLATE"
-        mkdir -p $(dirname $TEMPLATE)
-        cat << EOF > $TEMPLATE
+    read -d '' local CONTENT << EOF || true 
+#
 {
     "name": "podnet",
     "type": "flannel",
@@ -841,13 +817,13 @@ EOF
     }
 }
 EOF
+    if [ "${USE_CALICO}" = "false" ]; then
+      diff_content $TEMPLATE "$CONTENT"
     fi
 
     local TEMPLATE=/srv/kubernetes/manifests/calico.yaml
-    if [ "${USE_CALICO}" = "true" ]; then
-    echo "TEMPLATE: $TEMPLATE"
-    mkdir -p $(dirname $TEMPLATE)
-    cat << EOF > $TEMPLATE
+    read -d '' local CONTENT << EOF || true 
+#
 # This ConfigMap is used to configure a self-hosted Calico installation.
 kind: ConfigMap
 apiVersion: v1
@@ -1034,6 +1010,8 @@ spec:
             - name: CONFIGURE_ETC_HOSTS
               value: "true"
 EOF
+    if [ "${USE_CALICO}" = "true" ]; then
+      diff_content $TEMPLATE "$CONTENT"
     fi
 }
 
@@ -1086,9 +1064,9 @@ if [ $CONTAINER_RUNTIME = "rkt" ]; then
         systemctl enable rkt-api
 fi
 
-systemctl enable flanneld; systemctl start flanneld
+systemctl enable flanneld; systemctl restart flanneld
 
-systemctl enable kubelet; systemctl start kubelet
+systemctl enable kubelet; systemctl restart kubelet
 
 if [ $USE_CALICO = "true" ]; then
         start_calico
@@ -1096,3 +1074,4 @@ fi
 
 start_addons
 echo "DONE"
+

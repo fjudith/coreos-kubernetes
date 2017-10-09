@@ -10,7 +10,7 @@ export ETCD_ENDPOINTS=
 export CONTROLLER_ENDPOINT=
 
 # Specify the version (vX.Y.Z) of Kubernetes assets to deploy
-export K8S_VER=v1.5.4_coreos.0
+export K8S_VER=v1.7.5_coreos.0
 
 # Hyperkube image repository to use.
 export HYPERKUBE_IMAGE_REPO=quay.io/coreos/hyperkube
@@ -62,13 +62,27 @@ function init_config {
     done
 }
 
+function diff_content {
+  local TEMPLATE=$1
+  local CONTENT=$2
+  if [ -f $TEMPLATE ]; then
+    if [[ $(diff $TEMPLATE <(echo -e "$CONTENT") > /dev/null; echo $?) != 0 ]];
+      then
+      echo "TEMPLATE: $TEMPLATE"
+      echo -e "$CONTENT" > $TEMPLATE
+    fi
+  else
+    mkdir -p $(dirname $TEMPLATE)
+    echo "TEMPLATE: $TEMPLATE"
+    echo -e "$CONTENT" > $TEMPLATE
+  fi
+}
+
 function init_templates {
     local TEMPLATE=/etc/systemd/system/kubelet.service
     local uuid_file="/var/run/kubelet-pod.uuid"
-    if [ ! -f $TEMPLATE ]; then
-        echo "TEMPLATE: $TEMPLATE"
-        mkdir -p $(dirname $TEMPLATE)
-        cat << EOF > $TEMPLATE
+    read -d '' local CONTENT << EOF || true 
+#
 [Service]
 Environment=KUBELET_IMAGE_TAG=${K8S_VER}
 Environment=KUBELET_IMAGE_URL=${HYPERKUBE_IMAGE_REPO}
@@ -89,7 +103,7 @@ ExecStartPre=/usr/bin/mkdir -p /var/log/containers
 ExecStartPre=-/usr/bin/rkt rm --uuid-file=${uuid_file}
 ExecStartPre=/usr/bin/mkdir -p /opt/cni/bin
 ExecStart=/usr/lib/coreos/kubelet-wrapper \
-  --kubeconfig=/etc/kubernetes/worker-kubeconfig.yaml \
+  --api-servers=${CONTROLLER_ENDPOINT} \
   --cni-conf-dir=/etc/kubernetes/cni/net.d \
   --network-plugin=cni \
   --container-runtime=${CONTAINER_RUNTIME} \
@@ -98,9 +112,10 @@ ExecStart=/usr/lib/coreos/kubelet-wrapper \
   --register-node=true \
   --allow-privileged=true \
   --pod-manifest-path=/etc/kubernetes/manifests \
-  --hostname-override=${ADVERTISE_IP} \
+  --hostname-override=$(hostname) \
   --cluster_dns=${DNS_SERVICE_IP} \
   --cluster_domain=cluster.local \
+  --kubeconfig=/etc/kubernetes/worker-kubeconfig.yaml \
   --tls-cert-file=/etc/kubernetes/ssl/worker.pem \
   --tls-private-key-file=/etc/kubernetes/ssl/worker-key.pem
 ExecStop=-/usr/bin/rkt stop --uuid-file=${uuid_file}
@@ -110,13 +125,11 @@ RestartSec=10
 [Install]
 WantedBy=multi-user.target
 EOF
-    fi
+    diff_content $TEMPLATE "$CONTENT"
 
     local TEMPLATE=/opt/bin/host-rkt
-    if [ ! -f $TEMPLATE ]; then
-        echo "TEMPLATE: $TEMPLATE"
-        mkdir -p $(dirname $TEMPLATE)
-        cat << EOF > $TEMPLATE
+    read -d '' local CONTENT << EOF || true
+#
 #!/bin/sh
 # This is bind mounted into the kubelet rootfs and all rkt shell-outs go
 # through this rkt wrapper. It essentially enters the host mount namespace
@@ -127,14 +140,11 @@ EOF
 # through the api-server. Related issue:
 # https://github.com/coreos/rkt/issues/2878
 exec nsenter -m -u -i -n -p -t 1 -- /usr/bin/rkt "\$@"
-EOF
-    fi
+    diff_content $TEMPLATE "$CONTENT"
 
     local TEMPLATE=/etc/systemd/system/load-rkt-stage1.service
-    if [ ${CONTAINER_RUNTIME} = "rkt" ] && [ ! -f $TEMPLATE ]; then
-        echo "TEMPLATE: $TEMPLATE"
-        mkdir -p $(dirname $TEMPLATE)
-        cat << EOF > $TEMPLATE
+    read -d '' local CONTENT << EOF || true
+#
 [Unit]
 Description=Load rkt stage1 images
 Documentation=http://github.com/coreos/rkt
@@ -150,13 +160,13 @@ ExecStart=/usr/bin/rkt fetch /usr/lib/rkt/stage1-images/stage1-coreos.aci /usr/l
 [Install]
 RequiredBy=rkt-api.service
 EOF
+    if [ ${CONTAINER_RUNTIME} = "rkt" ]; then
+      diff_content $TEMPLATE "$CONTENT"
     fi
 
     local TEMPLATE=/etc/systemd/system/rkt-api.service
-    if [ ${CONTAINER_RUNTIME} = "rkt" ] && [ ! -f $TEMPLATE ]; then
-        echo "TEMPLATE: $TEMPLATE"
-        mkdir -p $(dirname $TEMPLATE)
-        cat << EOF > $TEMPLATE
+    read -d '' local CONTENT << EOF || true
+#
 [Unit]
 Before=kubelet.service
 
@@ -168,19 +178,18 @@ RestartSec=10
 [Install]
 RequiredBy=kubelet.service
 EOF
+    if [ ${CONTAINER_RUNTIME} = "rkt" ]; then
+      diff_content $TEMPLATE "$CONTENT"
     fi
 
     local TEMPLATE=/etc/kubernetes/worker-kubeconfig.yaml
-    if [ ! -f $TEMPLATE ]; then
-        echo "TEMPLATE: $TEMPLATE"
-        mkdir -p $(dirname $TEMPLATE)
-        cat << EOF > $TEMPLATE
+    read -d '' local CONTENT << EOF || true
+#
 apiVersion: v1
 kind: Config
 clusters:
 - name: local
   cluster:
-    server: ${MASTER_HOST}
     certificate-authority: /etc/kubernetes/ssl/ca.pem
 users:
 - name: kubelet
@@ -194,13 +203,11 @@ contexts:
   name: kubelet-context
 current-context: kubelet-context
 EOF
-    fi
+    diff_content $TEMPLATE "$CONTENT"
 
     local TEMPLATE=/etc/kubernetes/manifests/kube-proxy.yaml
-    if [ ! -f $TEMPLATE ]; then
-        echo "TEMPLATE: $TEMPLATE"
-        mkdir -p $(dirname $TEMPLATE)
-        cat << EOF > $TEMPLATE
+    read -d '' local CONTENT << EOF || true
+#
 apiVersion: v1
 kind: Pod
 metadata:
@@ -223,81 +230,70 @@ spec:
       privileged: true
     volumeMounts:
     - mountPath: /etc/ssl/certs
-      name: "ssl-certs"
+      name: ssl-certs
     - mountPath: /etc/kubernetes/worker-kubeconfig.yaml
-      name: "kubeconfig"
+      name: kubeconfig
       readOnly: true
     - mountPath: /etc/kubernetes/ssl
-      name: "etc-kube-ssl"
+      name: etc-kube-ssl
       readOnly: true
     - mountPath: /var/run/dbus
       name: dbus
       readOnly: false
   volumes:
-  - name: "ssl-certs"
+  - name: ssl-certs
     hostPath:
-      path: "/usr/share/ca-certificates"
-  - name: "kubeconfig"
+      path: /usr/share/ca-certificates
+  - name: kubeconfig
     hostPath:
-      path: "/etc/kubernetes/worker-kubeconfig.yaml"
-  - name: "etc-kube-ssl"
+      path: /etc/kubernetes/worker-kubeconfig.yaml
+  - name: etc-kube-ssl
     hostPath:
-      path: "/etc/kubernetes/ssl"
+      path: /etc/kubernetes/ssl
   - hostPath:
       path: /var/run/dbus
     name: dbus
 EOF
-    fi
+    diff_content $TEMPLATE "$CONTENT"
 
     local TEMPLATE=/etc/flannel/options.env
-    if [ ! -f $TEMPLATE ]; then
-        echo "TEMPLATE: $TEMPLATE"
-        mkdir -p $(dirname $TEMPLATE)
-        cat << EOF > $TEMPLATE
+    read -d '' local CONTENT << EOF || true
+#
 FLANNELD_IFACE=$ADVERTISE_IP
 FLANNELD_ETCD_ENDPOINTS=$ETCD_ENDPOINTS
 EOF
-    fi
+    diff_content $TEMPLATE "$CONTENT"
 
     local TEMPLATE=/etc/systemd/system/flanneld.service.d/40-ExecStartPre-symlink.conf.conf
-    if [ ! -f $TEMPLATE ]; then
-        echo "TEMPLATE: $TEMPLATE"
-        mkdir -p $(dirname $TEMPLATE)
-        cat << EOF > $TEMPLATE
+    read -d '' local CONTENT << EOF || true
+#
 [Service]
 ExecStartPre=/usr/bin/ln -sf /etc/flannel/options.env /run/flannel/options.env
 EOF
-    fi
+    diff_content $TEMPLATE "$CONTENT"
 
     local TEMPLATE=/etc/systemd/system/docker.service.d/40-flannel.conf
-    if [ ! -f $TEMPLATE ]; then
-        echo "TEMPLATE: $TEMPLATE"
-        mkdir -p $(dirname $TEMPLATE)
-        cat << EOF > $TEMPLATE
+    read -d '' local CONTENT << EOF || true
+#
 [Unit]
 Requires=flanneld.service
 After=flanneld.service
 [Service]
 EnvironmentFile=/etc/kubernetes/cni/docker_opts_cni.env
 EOF
-    fi
+    diff_content $TEMPLATE "$CONTENT"
 
     local TEMPLATE=/etc/kubernetes/cni/docker_opts_cni.env
-    if [ ! -f $TEMPLATE ]; then
-        echo "TEMPLATE: $TEMPLATE"
-        mkdir -p $(dirname $TEMPLATE)
-        cat << EOF > $TEMPLATE
+    read -d '' local CONTENT << EOF || true
+#
 DOCKER_OPT_BIP=""
 DOCKER_OPT_IPMASQ=""
 EOF
-
-    fi
+    diff_content $TEMPLATE "$CONTENT"
 
     local TEMPLATE=/etc/kubernetes/cni/net.d/10-flannel.conf
-    if [ "${USE_CALICO}" = "false" ] && [ ! -f "${TEMPLATE}" ]; then
-        echo "TEMPLATE: $TEMPLATE"
-        mkdir -p $(dirname $TEMPLATE)
-        cat << EOF > $TEMPLATE
+    read -d '' local CONTENT << EOF || true
+#
 {
     "name": "podnet",
     "type": "flannel",
@@ -306,6 +302,8 @@ EOF
     }
 }
 EOF
+    if [ "${USE_CALICO}" = "false" ]; then
+      diff_content $TEMPLATE "$CONTENT"
     fi
 
 }
@@ -324,7 +322,7 @@ if [ $CONTAINER_RUNTIME = "rkt" ]; then
         systemctl enable rkt-api
 fi
 
-systemctl enable flanneld; systemctl start flanneld
+systemctl enable flanneld; systemctl restart flanneld
 
 
-systemctl enable kubelet; systemctl start kubelet
+systemctl enable kubelet; systemctl restart kubelet
