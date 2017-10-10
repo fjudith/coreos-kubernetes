@@ -1,10 +1,13 @@
+# NOTE
+This is a private fork of [coreos-kubernetes](https://github.com/coreos/coreos-kubernetes/). As it is being discontinued in favor of their paid product, and I've found it very useful, I've decided to maintain is and update it. 
+
+These scripts are meant to be used in a 1.6.x environment with etcd3. The 'generic' scripts in 'multi-node' should be idempotent if used outside of a vagrant environment. The etcd3-cloud-config.yaml found inside the multi-node/vagrant directory should be enough to get you going in non-vagrant space.
+
 # Kubernetes on CoreOS Container Linux
 
-<div class="k8s-on-tectonic">
-<p class="k8s-on-tectonic-description">This repo is not in alignment with current versions of Kubernetes, and will not be active in the future. The CoreOS Kubernetes documentation has been moved to the <a href="https://github.com/coreos/tectonic-docs/tree/master/Documentation">tectonic-docs repo</a>, where it will be published and updated.</p>
+This repo is not in alignment with current versions of Kubernetes, and will not be active in the future. The CoreOS Kubernetes documentation has been moved to the [tectonic-docs repo](https://github.com/coreos/tectonic-docs/tree/master/Documentation), where it will be published and updated.
 
-<p class="k8s-on-tectonic-description">For tested, maintained, and production-ready Kubernetes instructions, see our <a href="https://coreos.com/tectonic/docs/latest/install/aws/index.html">Tectonic Installer documentation</a>. The Tectonic Installer provides a Terraform-based Kubernetes installation. It is open source, uses upstream Kubernetes and can be easily customized.</p>
-</div>
+For tested, maintained, and production-ready Kubernetes instructions, see our [Tectonic Installer documentation](https://coreos.com/tectonic/docs/latest/install/aws/index.html). The Tectonic Installer provides a Terraform-based Kubernetes installation. It is open source, uses upstream Kubernetes and can be easily customized.
 
 This repo contains tooling and documentation around deploying Kubernetes using CoreOS Container Linux.
 Initial setup of a Kubernetes cluster is covered, but ongoing maintenance and updates of the cluster is not addressed.
