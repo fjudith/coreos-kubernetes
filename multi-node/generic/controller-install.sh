@@ -20,7 +20,7 @@ export AUTOSCALER_IMAGE_REPO=gcr.io/google_containers/cluster-proportional-autos
 
 export AUTOSCALER_VER=1.0.0
 
-export HEAPSTER_IMAGE_REPO=gcr.io/google_containers/heapster:v1.2.0
+export HEAPSTER_IMAGE_REPO=gcr.io/google_containers/heapster
 
 export HEAPSTER_VER=v1.2.0
 
