@@ -10,20 +10,26 @@ export K8S_VER=v1.7.5_coreos.1
 # Hyperkube image repository to use.
 export HYPERKUBE_IMAGE_REPO=quay.io/coreos/hyperkube
 
-# Specify the version of kubedns
+# Specify kubedns
+# Used for internal hostname lookups
 export DNS_VER=1.9
 
-# kubedns image repository to use 
 export KUBEDNS_IMAGE_REPO=gcr.io/google_containers/kubedns-amd64
 
+# Specify autoscaler
+# for automatically scaling
 export AUTOSCALER_IMAGE_REPO=gcr.io/google_containers/cluster-proportional-autoscaler-amd64
 
 export AUTOSCALER_VER=1.0.0
 
+# Specify heapster
+# provides usage and operational statistics 
 export HEAPSTER_IMAGE_REPO=gcr.io/google_containers/heapster
 
 export HEAPSTER_VER=v1.2.0
 
+# Specify dashboard
+# actually view those statistics
 export DASHBOARD_IMAGE_REPO=gcr.io/google_containers/kubernetes-dashboard-amd64
 
 export DASHBOARD_VER=v1.5.0
@@ -110,6 +116,8 @@ function init_flannel {
         echo "Unexpected error configuring flannel pod network: $RES"
     fi
 }
+
+# This allows us to compare on-disk content with desired content, then write to disk if there is a difference
 function diff_content {
   local TEMPLATE=$1
   local CONTENT=$2
@@ -127,6 +135,8 @@ function diff_content {
 }
 
 function init_templates {
+
+  # the actual kubernetes service
     local TEMPLATE=/etc/systemd/system/kubelet.service
     local uuid_file="/var/run/kubelet-pod.uuid"
     read -d '' local CONTENT << EOF || true 
@@ -173,6 +183,7 @@ WantedBy=multi-user.target
 EOF
     diff_content $TEMPLATE "$CONTENT"
 
+  # master kubernetes config
     local TEMPLATE=/etc/kubernetes/master-kubeconfig.yaml
     read -d '' local CONTENT << EOF || true 
 #
@@ -193,6 +204,7 @@ current-context: kubelet-context
 EOF
     diff_content $TEMPLATE "$CONTENT"
 
+  #TODO: properly comment this
     local TEMPLATE=/opt/bin/host-rkt
     read -d '' local CONTENT << EOF || true 
 #
@@ -209,6 +221,7 @@ exec nsenter -m -u -i -n -p -t 1 -- /usr/bin/rkt "\$@"
 EOF
     diff_content $TEMPLATE "$CONTENT"
 
+  #TODO: properly comment this
     local TEMPLATE=/etc/systemd/system/load-rkt-stage1.service
     read -d '' local CONTENT << EOF || true 
 #
@@ -231,6 +244,7 @@ EOF
       diff_content $TEMPLATE "$CONTENT"
     fi
 
+  #TODO: properly comment this
     local TEMPLATE=/etc/systemd/system/rkt-api.service
     read -d '' local CONTENT << EOF || true 
 #
@@ -250,6 +264,7 @@ EOF
       diff_content $TEMPLATE "$CONTENT"
     fi
 
+  #TODO: properly comment this
     local TEMPLATE=/etc/kubernetes/manifests/kube-proxy.yaml
     read -d '' local CONTENT << EOF || true 
 #
@@ -289,6 +304,7 @@ spec:
 EOF
     diff_content $TEMPLATE "$CONTENT"
 
+  # what kubectl and virtually everything else talks to
     local TEMPLATE=/etc/kubernetes/manifests/kube-apiserver.yaml
     read -d '' local CONTENT << EOF || true 
 #
@@ -349,6 +365,7 @@ spec:
 EOF
     diff_content $TEMPLATE "$CONTENT"
 
+  #TODO: properly comment this
     local TEMPLATE=/etc/kubernetes/manifests/kube-controller-manager.yaml
     read -d '' local CONTENT << EOF || true 
 #
@@ -396,6 +413,7 @@ spec:
 EOF
     diff_content $TEMPLATE "$CONTENT"
 
+  #TODO: properly comment this
     local TEMPLATE=/etc/kubernetes/manifests/kube-scheduler.yaml
     read -d '' local CONTENT << EOF || true 
 #
@@ -427,6 +445,7 @@ spec:
 EOF
     diff_content $TEMPLATE "$CONTENT"
 
+  # the kube-dns deployer
     local TEMPLATE=/srv/kubernetes/manifests/kube-dns-de.yaml
     read -d '' local CONTENT << EOF || true 
 #
@@ -571,6 +590,7 @@ spec:
 EOF
     diff_content $TEMPLATE "$CONTENT"
 
+  # kube-dns autoscale deployment
     local TEMPLATE=/srv/kubernetes/manifests/kube-dns-autoscaler-de.yaml
     read -d '' local CONTENT << EOF || true 
 #
@@ -610,6 +630,7 @@ spec:
 EOF
     diff_content $TEMPLATE "$CONTENT"
 
+  # the kube-dns service
     local TEMPLATE=/srv/kubernetes/manifests/kube-dns-svc.yaml
     read -d '' local CONTENT << EOF || true 
 #
@@ -636,6 +657,7 @@ spec:
 EOF
     diff_content $TEMPLATE "$CONTENT"
 
+  # heapster deployment
     local TEMPLATE=/srv/kubernetes/manifests/heapster-de.yaml
     read -d '' local CONTENT << EOF || true 
 #
@@ -708,6 +730,7 @@ spec:
 EOF
     diff_content $TEMPLATE "$CONTENT"
 
+  # heapster service
     local TEMPLATE=/srv/kubernetes/manifests/heapster-svc.yaml
     read -d '' local CONTENT << EOF || true 
 #
@@ -728,6 +751,7 @@ spec:
 EOF
     diff_content $TEMPLATE "$CONTENT"
 
+  # dashboard deployment
     local TEMPLATE=/srv/kubernetes/manifests/kube-dashboard-de.yaml
     read -d '' local CONTENT << EOF || true 
 #
@@ -773,6 +797,7 @@ spec:
 EOF
     diff_content $TEMPLATE "$CONTENT"
 
+  # dashboard service
     local TEMPLATE=/srv/kubernetes/manifests/kube-dashboard-svc.yaml
     read -d '' local CONTENT << EOF || true 
 #
@@ -793,6 +818,29 @@ spec:
 EOF
     diff_content $TEMPLATE "$CONTENT"
 
+  # locksmithd needs to talk to etcd for etcd-locks
+    local TEMPLATE=/etc/systemd/system/locksmithd.service.d/40-Environment-etcd-endpoints.conf
+    read -d '' local CONTENT << EOF || true
+#
+[Service]
+Environment=LOCKSMITHCTL_ENDPOINT=$ETCD_ENDPOINTS
+Environment=LOCKSMITHCTL_ETCD_CAFILE=/etc/kubernetes/ssl/ca.pem
+Environment=LOCKSMITHCTL_ETCD_CERTFILE=/etc/kubernetes/ssl/controller.pem
+Environment=LOCKSMITHCTL_ETCD_KEYFILE=/etc/kubernetes/ssl/controller-key.pem
+EOF
+    diff_content $TEMPLATE "$CONTENT"
+
+  # locksmithd needs reboot windows configured
+    local TEMPLATE=/etc/systemd/system/locksmithd.service.d/50-Environment-reboot-window.conf
+    read -d '' local CONTENT << EOF || true
+#
+[Service]
+Environment=LOCKSMITHD_REBOOT_WINDOW_START=00:00
+Environment=LOCKSMITHD_REBOOT_WINDOW_LENGTH=23m59m
+EOF
+    diff_content $TEMPLATE "$CONTENT"
+
+  # basic flannel configs
     local TEMPLATE=/etc/flannel/options.env
     read -d '' local CONTENT << EOF || true 
 #
@@ -801,6 +849,7 @@ FLANNELD_ETCD_ENDPOINTS=$ETCD_ENDPOINTS
 EOF
     diff_content $TEMPLATE "$CONTENT"
 
+  # let's look for those basic flannel configs
     local TEMPLATE=/etc/systemd/system/flanneld.service.d/40-ExecStartPre-symlink.conf.conf
     read -d '' local CONTENT << EOF || true 
 #
@@ -809,6 +858,7 @@ ExecStartPre=/usr/bin/ln -sf /etc/flannel/options.env /run/flannel/options.env
 EOF
     diff_content $TEMPLATE "$CONTENT"
 
+  # still more options being sought
     local TEMPLATE=/etc/systemd/system/docker.service.d/40-flannel.conf
     read -d '' local CONTENT << EOF || true 
 #
@@ -820,6 +870,7 @@ EnvironmentFile=/etc/kubernetes/cni/docker_opts_cni.env
 EOF
     diff_content $TEMPLATE "$CONTENT"
 
+  # still more options
     local TEMPLATE=/etc/kubernetes/cni/docker_opts_cni.env
     read -d '' local CONTENT << EOF || true 
 #
@@ -843,6 +894,7 @@ EOF
       diff_content $TEMPLATE "$CONTENT"
     fi
 
+  # if calico is enabled, this configures it
     local TEMPLATE=/srv/kubernetes/manifests/calico.yaml
     read -d '' local CONTENT << EOF || true 
 #
@@ -1077,7 +1129,8 @@ chmod +x /opt/bin/host-rkt
 
 init_flannel
 
-systemctl stop update-engine; systemctl mask update-engine
+#systemctl stop update-engine; systemctl mask update-engine
+systemctl unmask update-engine; systemctl start update-engine
 
 systemctl daemon-reload
 
@@ -1087,6 +1140,8 @@ if [ $CONTAINER_RUNTIME = "rkt" ]; then
 fi
 
 systemctl enable flanneld; systemctl restart flanneld
+
+systemctl enable locksmithd; systemctl restart locksmithd
 
 systemctl enable kubelet; systemctl restart kubelet
 

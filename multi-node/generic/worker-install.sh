@@ -2,12 +2,12 @@
 set -e
 
 # List of etcd servers (http://ip:port), comma separated
-export ETCD_ENDPOINTS=
+export ETCD_ENDPOINTS=http://10.192.0.105:2379,http://10.192.0.108:2379
 
 # The endpoint the worker node should use to contact controller nodes (https://ip:port)
 # In HA configurations this should be an external DNS record or loadbalancer in front of the control nodes.
 # However, it is also possible to point directly to a single control node.
-export CONTROLLER_ENDPOINT=
+export CONTROLLER_ENDPOINT=https://10.192.0.106
 
 # Specify the version (vX.Y.Z) of Kubernetes assets to deploy
 export K8S_VER=v1.7.5_coreos.1
@@ -113,7 +113,7 @@ ExecStart=/usr/lib/coreos/kubelet-wrapper \
   --register-node=true \
   --allow-privileged=true \
   --pod-manifest-path=/etc/kubernetes/manifests \
-  --hostname-override=${ADVERTISE_IP} \
+  --hostname-override=$(hostname) \
   --cluster_dns=${DNS_SERVICE_IP} \
   --cluster_domain=cluster.local \
   --tls-cert-file=/etc/kubernetes/ssl/worker.pem \
@@ -259,6 +259,26 @@ spec:
 EOF
     diff_content $TEMPLATE "$CONTENT"
 
+    local TEMPLATE=/etc/systemd/system/locksmithd.service.d/40-Environment-etcd-endpoints.conf
+    read -d '' local CONTENT << EOF || true
+#
+[Service]
+Environment=LOCKSMITHCTL_ENDPOINT=$ETCD_ENDPOINTS
+Environment=LOCKSMITHCTL_ETCD_CAFILE=/etc/kubernetes/ssl/ca.pem
+Environment=LOCKSMITHCTL_ETCD_CERTFILE=/etc/kubernetes/ssl/worker.pem
+Environment=LOCKSMITHCTL_ETCD_KEYFILE=/etc/kubernetes/ssl/worker-key.pem
+EOF
+    diff_content $TEMPLATE "$CONTENT"
+
+    local TEMPLATE=/etc/systemd/system/locksmithd.service.d/50-Environment-reboot-window.conf
+    read -d '' local CONTENT << EOF || true
+#
+[Service]
+Environment=LOCKSMITHD_REBOOT_WINDOW_START=00:00
+Environment=LOCKSMITHD_REBOOT_WINDOW_LENGTH=23m59m
+EOF
+    diff_content $TEMPLATE "$CONTENT"
+
     local TEMPLATE=/etc/flannel/options.env
     read -d '' local CONTENT << EOF || true
 #
@@ -316,7 +336,8 @@ init_templates
 
 chmod +x /opt/bin/host-rkt
 
-systemctl stop update-engine; systemctl mask update-engine
+#systemctl stop update-engine; systemctl mask update-engine
+systemctl unmask update-engine; systemctl start update-engine
 
 systemctl daemon-reload
 
@@ -327,5 +348,7 @@ fi
 
 systemctl enable flanneld; systemctl restart flanneld
 
+systemctl enable locksmithd; systemctl restart locksmithd
 
 systemctl enable kubelet; systemctl restart kubelet
+
