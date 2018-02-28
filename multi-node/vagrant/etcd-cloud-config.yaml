@@ -4,7 +4,8 @@ coreos:
   update:
     reboot-strategy: "off"
 
-  etcd2:
+  etcd:
+    version: "3.3.0"
     name: {{ETCD_NODE_NAME}}
     initial-cluster: {{ETCD_INITIAL_CLUSTER}}
     advertise-client-urls: http://$private_ipv4:2379
@@ -13,7 +14,6 @@ coreos:
     listen-peer-urls: http://$private_ipv4:2380
 
   units:
-
-  - name: etcd2.service
+  - name: etcd-member.service
     command: start
 
