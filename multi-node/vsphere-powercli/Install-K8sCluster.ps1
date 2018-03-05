@@ -222,7 +222,7 @@ PARAM(
     [parameter(mandatory=$false)][Int]$WorkerCIDR = 24,
     [parameter(mandatory=$false)][Int]$WorkerStartFrom = 200,
     [parameter(mandatory=$false)][String]$WorkerGateway = '192.168.251.254',
-    [parameter(mandatory=$false)][string[]]$ControllerHardDisk = @(4GB ; 8GB ; 16GB)
+    [parameter(mandatory=$false)][string[]]$WorkerHardDisk = @(4GB ; 8GB ; 16GB)
 )
 BEGIN{
     Set-StrictMode -Version 5

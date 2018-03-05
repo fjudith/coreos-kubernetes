@@ -3,7 +3,8 @@ set -e
 
 # define location of openssl binary manually since running this
 # script under Vagrant fails on some systems without it
-OPENSSL=$(which openssl)
+#OPENSSL=$(which openssl)
+OPENSSL="/mingw64/bin/openssl"
 
 function usage {
     echo "USAGE: $0 <output-dir> <cert-base-name> <CN> [SAN,SAN,SAN]"

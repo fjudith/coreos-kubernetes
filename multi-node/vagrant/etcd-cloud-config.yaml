@@ -5,7 +5,7 @@ coreos:
     reboot-strategy: "off"
 
   etcd:
-    version: "3.3.0"
+    version: "3.2.11"
     name: {{ETCD_NODE_NAME}}
     initial-cluster: {{ETCD_INITIAL_CLUSTER}}
     advertise-client-urls: http://$private_ipv4:2379
