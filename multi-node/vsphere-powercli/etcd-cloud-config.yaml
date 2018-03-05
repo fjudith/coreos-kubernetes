@@ -1,4 +1,6 @@
 #cloud-config
+# https://coreos.com/etcd/docs/latest/etcd-live-cluster-reconfiguration.html
+
 coreos:
   update:
     reboot-strategy: "off"
