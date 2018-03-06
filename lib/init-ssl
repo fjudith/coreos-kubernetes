@@ -68,7 +68,7 @@ echo "$CNF_TEMPLATE$(echo $SANS | tr ',' '\n')" > "$CONFIGFILE"
 
 
 "$OPENSSL" genrsa -out "$KEYFILE" 2048
-"$OPENSSL" req -new -key "$KEYFILE" -out "$CSRFILE" -subj "//CN=$CN/O=system:masters" -config "$CONFIGFILE"
+"$OPENSSL" req -new -key "$KEYFILE" -out "$CSRFILE" -subj "/CN=$CN/O=system:masters" -config "$CONFIGFILE"
 
 "$OPENSSL" x509 -req -in "$CSRFILE" -CA "$CAFILE" -CAkey "$CAKEYFILE" -CAcreateserial -out "$PEMFILE" -days 365 -extensions v3_req -extfile "$CONFIGFILE"
 
