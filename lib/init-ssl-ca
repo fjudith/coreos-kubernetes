@@ -3,8 +3,7 @@ set -e
 
 # define location of openssl binary manually since running this
 # script under Vagrant fails on some systems without it
-#OPENSSL=$(which openssl)
-OPENSSL="/mingw64/bin/openssl"
+OPENSSL=$(which openssl)
 
 function usage {
     echo "USAGE: $0 <output-dir>"
@@ -31,6 +30,6 @@ fi
 
 # establish cluster CA and self-sign a cert
 openssl genrsa -out "$OUTDIR/ca-key.pem" 2048
-openssl req -x509 -new -nodes -key "$OUTDIR/ca-key.pem" -days 10000 -out "$OUTFILE" -subj "/CN=kube-ca"
+openssl req -x509 -new -nodes -key "$OUTDIR/ca-key.pem" -days 10000 -out "$OUTFILE" -subj "//O=kubernetes/CN=kube-ca"
 
 

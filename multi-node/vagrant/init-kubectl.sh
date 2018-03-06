@@ -1,4 +1,4 @@
-export KUBECONFIG="$KUBECONFIG:$(pwd)/kubeconfig"
+export KUBECONFIG="$(pwd)/kubeconfig"
 kubectl config use-context vagrant-multi
 kubectl config set-cluster vagrant-multi-cluster --server=https://172.17.4.101:443 --certificate-authority=${PWD}/ssl/ca.pem
 kubectl config set-credentials vagrant-multi-admin --certificate-authority=${PWD}/ssl/ca.pem --client-key=${PWD}/ssl/admin-key.pem --client-certificate=${PWD}/ssl/admin.pem

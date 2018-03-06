@@ -3,8 +3,7 @@ set -e
 
 # define location of openssl binary manually since running this
 # script under Vagrant fails on some systems without it
-#OPENSSL=$(which openssl)
-OPENSSL="/mingw64/bin/openssl"
+OPENSSL=$(which openssl)
 
 function usage {
     echo "USAGE: $0 <output-dir> <cert-base-name> <CN> [SAN,SAN,SAN]"
@@ -68,7 +67,7 @@ echo "$CNF_TEMPLATE$(echo $SANS | tr ',' '\n')" > "$CONFIGFILE"
 
 
 "$OPENSSL" genrsa -out "$KEYFILE" 2048
-"$OPENSSL" req -new -key "$KEYFILE" -out "$CSRFILE" -subj "/CN=$CN/O=system:masters" -config "$CONFIGFILE"
+"$OPENSSL" req -new -key "$KEYFILE" -out "$CSRFILE" -subj "/O=system:masters/CN=$CN" -config "$CONFIGFILE"
 
 "$OPENSSL" x509 -req -in "$CSRFILE" -CA "$CAFILE" -CAkey "$CAKEYFILE" -CAcreateserial -out "$PEMFILE" -days 365 -extensions v3_req -extfile "$CONFIGFILE"
 
