@@ -1,0 +1,8 @@
+.ova
+.vsphere
+.ssh
+ssl
+Format-CoreOSDisk.ps1
+kubeconfig
+config.ps1
+busybox.yaml

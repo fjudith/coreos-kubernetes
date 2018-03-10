@@ -1,0 +1,41 @@
+#cloud-config
+coreos:
+  update:
+    reboot-strategy: "off"
+  units:
+    - name: docker.service
+      enable: true
+    - name: coreos-cloudinit-vsphere-mkdir.service
+      command: start
+      runtime: yes
+      content: |
+        [Service]
+        Type=oneshot
+        ExecStart=/bin/mkdir -p /var/lib/coreos-vsphere
+    - name: coreos-cloudinit-vsphere-user.path
+      command: start
+      runtime: yes
+      content: |
+        [Path]
+        PathExists=/var/lib/coreos-vsphere/vsphere-user-data
+        Unit=user-cloudinit@var-lib-coreos\x2dvsphere-vsphere\x2duser\x2ddata.service
+write_files:
+  # increase docker open files limits
+  # https://github.com/Ulexus/docker-ceph/issues/5
+  - path: /etc/systemd/system/docker.service.d/limits.conf
+    owner: root
+    permissions: '0644'
+    content: |
+      [Service]
+      LimitNOFILE=4096
+  - path: /etc/environment
+    owner: root
+    permissions: '0644'
+    content: |
+      COREOS_PUBLIC_IPV4=$private_ipv4
+      COREOS_PRIVATE_IPV4=$private_ipv4
+  - path: /run/coreos-kubernetes/options.env
+    owner: root
+    permissions: '0644'
+    content: |
+      ETCD_ENDPOINTS={{ETCD_ENDPOINTS}}

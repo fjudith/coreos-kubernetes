@@ -10,7 +10,11 @@ export ETCD_ENDPOINTS=
 export CONTROLLER_ENDPOINT=
 
 # Specify the version (vX.Y.Z) of Kubernetes assets to deploy
+<<<<<<< HEAD
 export K8S_VER=v1.7.3_coreos.0
+=======
+export K8S_VER=v1.7.12_coreos.0
+>>>>>>> vsphere-powercli
 
 # Hyperkube image repository to use.
 export HYPERKUBE_IMAGE_REPO=quay.io/coreos/hyperkube
@@ -25,7 +29,7 @@ export POD_NETWORK=10.2.0.0/16
 export DNS_SERVICE_IP=10.3.0.10
 
 # Whether to use Calico for Kubernetes network policy.
-export USE_CALICO=true
+export USE_CALICO=false
 
 # Determines the container runtime for kubernetes to use. Accepts 'docker' or 'rkt'.
 export CONTAINER_RUNTIME=docker
@@ -70,6 +74,7 @@ function init_templates {
         mkdir -p $(dirname $TEMPLATE)
         cat << EOF > $TEMPLATE
 [Service]
+Environment=PATH=/opt/bin/:/usr/bin/:/usr/sbin:${PATH}
 Environment=KUBELET_IMAGE_TAG=${K8S_VER}
 Environment=KUBELET_IMAGE_URL=${HYPERKUBE_IMAGE_REPO}
 Environment="RKT_RUN_ARGS=--uuid-file-save=${uuid_file} \

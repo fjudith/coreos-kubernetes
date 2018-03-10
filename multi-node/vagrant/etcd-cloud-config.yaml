@@ -1,10 +1,12 @@
 #cloud-config
+# https://coreos.com/etcd/docs/latest/etcd-live-cluster-reconfiguration.html
 
 coreos:
   update:
     reboot-strategy: "off"
 
   etcd2:
+    #version: "3.2.11"
     name: {{ETCD_NODE_NAME}}
     initial-cluster: {{ETCD_INITIAL_CLUSTER}}
     advertise-client-urls: http://$private_ipv4:2379
@@ -13,7 +15,7 @@ coreos:
     listen-peer-urls: http://$private_ipv4:2380
 
   units:
-
+  #- name: etcd-member.service
   - name: etcd2.service
     command: start
 

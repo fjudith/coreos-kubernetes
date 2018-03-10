@@ -19,9 +19,10 @@ USER_DATA_PATH = File.expand_path("user-data")
 SSL_TARBALL_PATH = File.expand_path("ssl/controller.tar")
 $node_disk_sizes = [4, 5, 6] # size in GB of each disk
 
-system("mkdir -p ssl && ./../lib/init-ssl-ca ssl") or abort ("failed generating SSL CA artifacts")
-system("./../lib/init-ssl ssl apiserver controller IP.1=#{NODE_IP},IP.2=#{CLUSTER_IP}") or abort ("failed generating SSL certificate artifacts")
-system("./../lib/init-ssl ssl admin kube-admin") or abort("failed generating admin SSL artifacts")
+FileUtils.mkdir_p("ssl")
+system("bash", "-c", "./../lib/init-ssl-ca.sh ssl") or abort ("failed generating SSL CA artifacts")
+system("bash", "-c", "./../lib/init-ssl.sh ssl apiserver controller IP.1=#{NODE_IP},IP.2=#{CLUSTER_IP}") or abort ("failed generating SSL certificate artifacts")
+system("bash", "-c", "./../lib/init-ssl.sh ssl admin kube-admin") or abort("failed generating admin SSL artifacts")
 
 Vagrant.configure("2") do |config|
   # always use Vagrant's insecure key
