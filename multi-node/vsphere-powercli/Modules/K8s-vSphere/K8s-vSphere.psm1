@@ -1039,10 +1039,6 @@ Function New-K8sControllerCluster
         $MemoryMB = 1024,
 
         [parameter(mandatory=$false)]
-        [string[]]
-        $HardDisk = @(4GB, 5GB, 6GB),
-
-        [parameter(mandatory=$false)]
         [string]
         $DataStore = 'datastore1',
 
@@ -1157,7 +1153,7 @@ Function New-K8sControllerCluster
             }
 
             # Configure and Start VM
-            Set-CoreOSVirtualHardware -VM $VMObject -numCpu $numCpu -MemoryMB $MemoryMB -HardDisk $HardDisk
+            Set-CoreOSVirtualHardware -VM $VMObject -numCpu $numCpu -MemoryMB $MemoryMB
             Write-CoreOSCloudConfig -VM $VMObject -GuestInfo $GuestInfo -CloudConfigPath "${ConfigPath}"
 
             Test-TcpConnection -ComputerName $IP -Port 22 -Loop

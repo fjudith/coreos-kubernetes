@@ -5,11 +5,7 @@ set -e
 export ETCD_ENDPOINTS=
 
 # Specify the version (vX.Y.Z) of Kubernetes assets to deploy
-<<<<<<< HEAD
-export K8S_VER=v1.7.3_coreos.0
-=======
 export K8S_VER=v1.7.12_coreos.0
->>>>>>> vsphere-powercli
 
 # Hyperkube image repository to use.
 export HYPERKUBE_IMAGE_REPO=quay.io/coreos/hyperkube
