@@ -117,13 +117,6 @@ Vagrant.configure("2") do |config|
   (1..$etcd_count).each do |i|
     config.vm.define vm_name = "e%d" % i do |etcd|
 
-      data = YAML.load(IO.readlines(ETCD_CLOUD_CONFIG_PATH)[1..-1].join)
-      data['coreos']['etcd2']['initial-cluster'] = initial_etcd_cluster
-      data['coreos']['etcd2']['name'] = vm_name
-      etcd_config_file = Tempfile.new('etcd_config', :binmode => true)
-      etcd_config_file.write("#cloud-config\n#{data.to_yaml}")
-      etcd_config_file.close
-
       etcd.vm.hostname = vm_name
 
       ["vmware_fusion", "vmware_workstation"].each do |vmware|
@@ -142,7 +135,12 @@ Vagrant.configure("2") do |config|
 
       etcd.vm.network :private_network, ip: etcdIP(i)
 
-      etcd.vm.provision :file, :source => etcd_config_file.path, :destination => "/tmp/vagrantfile-user-data"
+      etcd.vm.provision :file, :source => ETCD_CLOUD_CONFIG_PATH, :destination => "/tmp/vagrantfile-user-data"
+      etcd.vm.provision :shell, :privileged => true,
+      inline: <<-EOF
+        sed -i"*" "s|{{ETCD_INITIAL_CLUSTER}}|#{initial_etcd_cluster}|g" /tmp/vagrantfile-user-data
+        sed -i"*" "s|{{ETCD_NODE_NAME}}|#{vm_name}|g" /tmp/vagrantfile-user-data
+      EOF
       etcd.vm.provision :shell, :inline => "mv /tmp/vagrantfile-user-data /var/lib/coreos-vagrant/", :privileged => true
     end
   end

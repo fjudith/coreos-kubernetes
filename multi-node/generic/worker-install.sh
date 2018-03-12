@@ -10,10 +10,15 @@ export ETCD_ENDPOINTS=
 export CONTROLLER_ENDPOINT=
 
 # Specify the version (vX.Y.Z) of Kubernetes assets to deploy
-export K8S_VER=v1.7.12_coreos.0
+# https://kubernetes.io/docs/reference/workloads-18-19/
+export K8S_VER=v1.9.2_coreos.0
 
 # Hyperkube image repository to use.
 export HYPERKUBE_IMAGE_REPO=quay.io/coreos/hyperkube
+
+# CNI plugin
+# https://github.com/containernetworking/plugins/releases
+export CNI_VER=0.7.0
 
 # The CIDR network to use for pod IPs.
 # Each pod launched in the cluster will be assigned an IP out of this range.
@@ -41,11 +46,20 @@ else
     export CALICO_OPTS=""
 fi
 
+cd ~
+wget https://github.com/containernetworking/plugins/releases/download/v${CNI_VER}/cni-plugins-amd64-v${CNI_VER}.tgz
+mkdir -pv /opt/cni/bin && cd /opt/cni/bin
+tar xf ~/cni-plugins-amd64-v${CNI_VER}.tgz
+
+iptables -P FORWARD ACCEPT
+
 # -------------
+
+
 
 function init_config {
     local REQUIRED=( 'ADVERTISE_IP' 'ETCD_ENDPOINTS' 'CONTROLLER_ENDPOINT' 'DNS_SERVICE_IP' 'K8S_VER' 'HYPERKUBE_IMAGE_REPO' 'USE_CALICO' )
-
+    
     if [ -f $ENV_FILE ]; then
         export $(cat $ENV_FILE | xargs)
     fi
@@ -94,8 +108,10 @@ ExecStartPre=/usr/bin/mkdir -p /var/log/containers
 ExecStartPre=-/usr/bin/rkt rm --uuid-file=${uuid_file}
 ExecStartPre=/usr/bin/mkdir -p /opt/cni/bin
 ExecStart=/usr/lib/coreos/kubelet-wrapper \
-  --api-servers=${CONTROLLER_ENDPOINT} \
+  --require-kubeconfig \
+  --pod-infra-container-image=ibmcom/pause:3.0 \
   --cni-conf-dir=/etc/kubernetes/cni/net.d \
+  --cni-bin-dir=/opt/cni/bin \
   --network-plugin=cni \
   --container-runtime=${CONTAINER_RUNTIME} \
   --rkt-path=/usr/bin/rkt \
@@ -116,6 +132,28 @@ RestartSec=10
 
 [Install]
 WantedBy=multi-user.target
+EOF
+    fi
+
+    local TEMPLATE=/etc/kubernetes/worker-kubeconfig.yaml
+    if [ ! -f $TEMPLATE ]; then
+        echo "TEMPLATE: $TEMPLATE"
+        mkdir -p $(dirname $TEMPLATE)
+        cat << EOF > $TEMPLATE
+apiVersion: v1
+kind: Config
+clusters:
+- name: local
+  cluster:
+    server: ${CONTROLLER_ENDPOINT}
+users:
+- name: kubelet
+contexts:
+- context:
+    cluster: local
+    user: kubelet
+  name: kubelet-context
+current-context: kubelet-context
 EOF
     fi
 
@@ -330,7 +368,7 @@ if [ $CONTAINER_RUNTIME = "rkt" ]; then
         systemctl enable rkt-api
 fi
 
-systemctl enable flanneld; systemctl start flanneld
+# systemctl enable flanneld; systemctl start flanneld
 
 
 systemctl enable kubelet; systemctl start kubelet
