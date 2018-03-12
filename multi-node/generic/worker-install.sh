@@ -11,7 +11,8 @@ export CONTROLLER_ENDPOINT=
 
 # Specify the version (vX.Y.Z) of Kubernetes assets to deploy
 # https://kubernetes.io/docs/reference/workloads-18-19/
-export K8S_VER=v1.9.2_coreos.0
+# https://nixaid.com/deploying-kubernetes-cluster-from-scratch/
+export K8S_VER=v1.9.3_coreos.0
 
 # Hyperkube image repository to use.
 export HYPERKUBE_IMAGE_REPO=quay.io/coreos/hyperkube
@@ -45,13 +46,6 @@ if [ "${USE_CALICO}" = "true" ]; then
 else
     export CALICO_OPTS=""
 fi
-
-cd ~
-wget https://github.com/containernetworking/plugins/releases/download/v${CNI_VER}/cni-plugins-amd64-v${CNI_VER}.tgz
-mkdir -pv /opt/cni/bin && cd /opt/cni/bin
-tar xf ~/cni-plugins-amd64-v${CNI_VER}.tgz
-
-iptables -P FORWARD ACCEPT
 
 # -------------
 
@@ -102,20 +96,20 @@ Environment="RKT_RUN_ARGS=--uuid-file-save=${uuid_file} \
   --mount volume=modprobe,target=/usr/sbin/modprobe \
   --volume lib-modules,kind=host,source=/lib/modules \
   --mount volume=lib-modules,target=/lib/modules \
+  --volume etc-cni-netd,kind=host,source=/etc/cni/net.d \
+  --mount volume=etc-cni-netd,target=/etc/cni/net.d \
   ${CALICO_OPTS}"
 ExecStartPre=/usr/bin/mkdir -p /etc/kubernetes/manifests
 ExecStartPre=/usr/bin/mkdir -p /var/log/containers
 ExecStartPre=-/usr/bin/rkt rm --uuid-file=${uuid_file}
 ExecStartPre=/usr/bin/mkdir -p /opt/cni/bin
+ExecStartPre=/usr/bin/mkdir -p /etc/cni/net.d
 ExecStart=/usr/lib/coreos/kubelet-wrapper \
-  --require-kubeconfig \
-  --pod-infra-container-image=ibmcom/pause:3.0 \
-  --cni-conf-dir=/etc/kubernetes/cni/net.d \
+  --cni-conf-dir=/etc/cni/net.d \
   --cni-bin-dir=/opt/cni/bin \
   --network-plugin=cni \
   --container-runtime=${CONTAINER_RUNTIME} \
   --rkt-path=/usr/bin/rkt \
-  --rkt-stage1-image=coreos.com/rkt/stage1-coreos \
   --register-node=true \
   --allow-privileged=true \
   --pod-manifest-path=/etc/kubernetes/manifests \
@@ -126,34 +120,13 @@ ExecStart=/usr/lib/coreos/kubelet-wrapper \
   --tls-cert-file=/etc/kubernetes/ssl/worker.pem \
   --tls-private-key-file=/etc/kubernetes/ssl/worker-key.pem \
   --volume-plugin-dir=/etc/kubernetes/volumeplugins
+  --v=2
 ExecStop=-/usr/bin/rkt stop --uuid-file=${uuid_file}
 Restart=always
 RestartSec=10
 
 [Install]
 WantedBy=multi-user.target
-EOF
-    fi
-
-    local TEMPLATE=/etc/kubernetes/worker-kubeconfig.yaml
-    if [ ! -f $TEMPLATE ]; then
-        echo "TEMPLATE: $TEMPLATE"
-        mkdir -p $(dirname $TEMPLATE)
-        cat << EOF > $TEMPLATE
-apiVersion: v1
-kind: Config
-clusters:
-- name: local
-  cluster:
-    server: ${CONTROLLER_ENDPOINT}
-users:
-- name: kubelet
-contexts:
-- context:
-    cluster: local
-    user: kubelet
-  name: kubelet-context
-current-context: kubelet-context
 EOF
     fi
 
@@ -225,6 +198,7 @@ kind: Config
 clusters:
 - name: local
   cluster:
+    server: ${CONTROLLER_ENDPOINT}
     certificate-authority: /etc/kubernetes/ssl/ca.pem
 users:
 - name: kubelet
@@ -263,6 +237,9 @@ spec:
     - --master=${CONTROLLER_ENDPOINT}
     - --cluster-cidr=${POD_NETWORK}
     - --kubeconfig=/etc/kubernetes/worker-kubeconfig.yaml
+    - --bind-address=${ADVERTISE_IP}
+    - --logtostderr=true
+    - --v=2
     securityContext:
       privileged: true
     volumeMounts:
@@ -293,64 +270,89 @@ spec:
 EOF
     fi
 
-    local TEMPLATE=/etc/flannel/options.env
-    if [ ! -f $TEMPLATE ]; then
-        echo "TEMPLATE: $TEMPLATE"
-        mkdir -p $(dirname $TEMPLATE)
-        cat << EOF > $TEMPLATE
-FLANNELD_IFACE=$ADVERTISE_IP
-FLANNELD_ETCD_ENDPOINTS=$ETCD_ENDPOINTS
-EOF
-    fi
+#     local TEMPLATE=/etc/cni/net.d/10-flannel.conflist
+#     if [ ! -f $TEMPLATE ]; then
+#         echo "TEMPLATE: $TEMPLATE"
+#         mkdir -p $(dirname $TEMPLATE)
+#         cat << EOF > $TEMPLATE
+# {
+#   "name": "cbr0",
+#   "plugins": [
+#     {
+#       "type": "flannel",
+#       "delegate": {
+#         "hairpinMode": true,
+#         "isDefaultGateway": true
+#       }
+#     },
+#     {
+#       "type": "portmap",
+#       "capabilities": {
+#         "portMappings": true
+#       }
+#     }
+#   ]
+# }
+# EOF
+#     fi
 
-    local TEMPLATE=/etc/systemd/system/flanneld.service.d/40-ExecStartPre-symlink.conf.conf
-    if [ ! -f $TEMPLATE ]; then
-        echo "TEMPLATE: $TEMPLATE"
-        mkdir -p $(dirname $TEMPLATE)
-        cat << EOF > $TEMPLATE
-[Service]
-ExecStartPre=/usr/bin/ln -sf /etc/flannel/options.env /run/flannel/options.env
-EOF
-    fi
+#     local TEMPLATE=/etc/flannel/options.env
+#     if [ ! -f $TEMPLATE ]; then
+#         echo "TEMPLATE: $TEMPLATE"
+#         mkdir -p $(dirname $TEMPLATE)
+#         cat << EOF > $TEMPLATE
+# FLANNELD_IFACE=$ADVERTISE_IP
+# FLANNELD_ETCD_ENDPOINTS=$ETCD_ENDPOINTS
+# EOF
+#     fi
 
-    local TEMPLATE=/etc/systemd/system/docker.service.d/40-flannel.conf
-    if [ ! -f $TEMPLATE ]; then
-        echo "TEMPLATE: $TEMPLATE"
-        mkdir -p $(dirname $TEMPLATE)
-        cat << EOF > $TEMPLATE
-[Unit]
-Requires=flanneld.service
-After=flanneld.service
-[Service]
-EnvironmentFile=/etc/kubernetes/cni/docker_opts_cni.env
-EOF
-    fi
+#     local TEMPLATE=/etc/systemd/system/flanneld.service.d/40-ExecStartPre-symlink.conf.conf
+#     if [ ! -f $TEMPLATE ]; then
+#         echo "TEMPLATE: $TEMPLATE"
+#         mkdir -p $(dirname $TEMPLATE)
+#         cat << EOF > $TEMPLATE
+# [Service]
+# ExecStartPre=/usr/bin/ln -sf /etc/flannel/options.env /run/flannel/options.env
+# EOF
+#     fi
 
-    local TEMPLATE=/etc/kubernetes/cni/docker_opts_cni.env
-    if [ ! -f $TEMPLATE ]; then
-        echo "TEMPLATE: $TEMPLATE"
-        mkdir -p $(dirname $TEMPLATE)
-        cat << EOF > $TEMPLATE
-DOCKER_OPT_BIP=""
-DOCKER_OPT_IPMASQ=""
-EOF
+#     local TEMPLATE=/etc/systemd/system/docker.service.d/40-flannel.conf
+#     if [ ! -f $TEMPLATE ]; then
+#         echo "TEMPLATE: $TEMPLATE"
+#         mkdir -p $(dirname $TEMPLATE)
+#         cat << EOF > $TEMPLATE
+# [Unit]
+# Requires=flanneld.service
+# After=flanneld.service
+# [Service]
+# EnvironmentFile=/etc/kubernetes/cni/docker_opts_cni.env
+# EOF
+#     fi
 
-    fi
+#     local TEMPLATE=/etc/kubernetes/cni/docker_opts_cni.env
+#     if [ ! -f $TEMPLATE ]; then
+#         echo "TEMPLATE: $TEMPLATE"
+#         mkdir -p $(dirname $TEMPLATE)
+#         cat << EOF > $TEMPLATE
+# DOCKER_OPT_BIP=""
+# DOCKER_OPT_IPMASQ=""
+# EOF
+#     fi
 
-    local TEMPLATE=/etc/kubernetes/cni/net.d/10-flannel.conf
-    if [ "${USE_CALICO}" = "false" ] && [ ! -f "${TEMPLATE}" ]; then
-        echo "TEMPLATE: $TEMPLATE"
-        mkdir -p $(dirname $TEMPLATE)
-        cat << EOF > $TEMPLATE
-{
-    "name": "podnet",
-    "type": "flannel",
-    "delegate": {
-        "isDefaultGateway": true
-    }
-}
-EOF
-    fi
+#     local TEMPLATE=/etc/kubernetes/cni/net.d/10-flannel.conf
+#     if [ "${USE_CALICO}" = "false" ] && [ ! -f "${TEMPLATE}" ]; then
+#         echo "TEMPLATE: $TEMPLATE"
+#         mkdir -p $(dirname $TEMPLATE)
+#         cat << EOF > $TEMPLATE
+# {
+#     "name": "podnet",
+#     "type": "flannel",
+#     "delegate": {
+#         "isDefaultGateway": true
+#     }
+# }
+# EOF
+#     fi
 
 }
 

@@ -6,7 +6,7 @@ export ETCD_ENDPOINTS=
 
 # Specify the version (vX.Y.Z) of Kubernetes assets to deploy
 # https://kubernetes.io/docs/reference/workloads-18-19/
-export K8S_VER=v1.9.2_coreos.0
+export K8S_VER=v1.9.3_coreos.0
 
 # Hyperkube image repository to use.
 export HYPERKUBE_IMAGE_REPO=quay.io/coreos/hyperkube
@@ -51,13 +51,6 @@ if [ "${USE_CALICO}" = "true" ]; then
 else
     export CALICO_OPTS=""
 fi
-
-cd ~
-wget https://github.com/containernetworking/plugins/releases/download/v${CNI_VER}/cni-plugins-amd64-v${CNI_VER}.tgz
-mkdir -pv /opt/cni/bin && cd /opt/cni/bin
-tar xf ~/cni-plugins-amd64-v${CNI_VER}.tgz
-
-iptables -P FORWARD ACCEPT
 
 # -------------
 
@@ -232,7 +225,8 @@ spec:
         - /opt/bin/flanneld
         args:
         - --ip-masq
-        - --kube-subnet-mgr
+        #- --kube-subnet-mgr
+        #- -v 10
         resources:
           requests:
             cpu: "100m"
@@ -251,6 +245,10 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.namespace
+        - name: FLANNELD_ETCD_ENDPOINTS
+          value: ${ETCD_ENDPOINTS}
+        - name: FLANNELD_ETCD_PREFIX
+          value: /coreos.com/network
         volumeMounts:
         - name: run
           mountPath: /run
@@ -296,22 +294,22 @@ Environment="RKT_RUN_ARGS=--uuid-file-save=${uuid_file} \
   --mount volume=modprobe,target=/usr/sbin/modprobe \
   --volume lib-modules,kind=host,source=/lib/modules \
   --mount volume=lib-modules,target=/lib/modules \
+  --volume etc-cni-netd,kind=host,source=/etc/cni/net.d \
+  --mount volume=etc-cni-netd,target=/etc/cni/net.d \
   ${CALICO_OPTS}"
 ExecStartPre=/usr/bin/mkdir -p /etc/kubernetes/manifests
 ExecStartPre=/usr/bin/mkdir -p /opt/cni/bin
+ExecStartPre=/usr/bin/mkdir -p /etc/cni/net.d
 ExecStartPre=/usr/bin/mkdir -p /var/log/containers
 ExecStartPre=-/usr/bin/rkt rm --uuid-file=${uuid_file}
 ExecStart=/usr/lib/coreos/kubelet-wrapper \
   --kubeconfig=/etc/kubernetes/master-kubeconfig.yaml \
-  --require-kubeconfig \
   --register-schedulable=false \
-  --pod-infra-container-image=ibmcom/pause:3.0 \
-  --cni-conf-dir=/etc/kubernetes/cni/net.d \
+  --cni-conf-dir=/etc/cni/net.d \
   --cni-bin-dir=/opt/cni/bin \
   --network-plugin=cni \
   --container-runtime=${CONTAINER_RUNTIME} \
   --rkt-path=/usr/bin/rkt \
-  --rkt-stage1-image=coreos.com/rkt/stage1-coreos \
   --allow-privileged=true \
   --pod-manifest-path=/etc/kubernetes/manifests \
   --hostname-override=${ADVERTISE_IP} \
@@ -479,10 +477,11 @@ spec:
     - --tls-private-key-file=/etc/kubernetes/ssl/apiserver-key.pem
     - --client-ca-file=/etc/kubernetes/ssl/ca.pem
     - --service-account-key-file=/etc/kubernetes/ssl/apiserver-key.pem
-    - --runtime-config=apps/v1/networkpolicies=true
+    - --runtime-config=extensions/v1beta1/networkpolicies=true
     - --anonymous-auth=false
     - --storage-backend=etcd3
     - --storage-media-type=application/json
+    - --v=2
     livenessProbe:
       httpGet:
         host: 127.0.0.1
@@ -494,6 +493,8 @@ spec:
     - containerPort: 443
       hostPort: 443
       name: https
+    - containerPort: 7080
+      hostPort: 7080
     - containerPort: 8080
       hostPort: 8080
       name: local
@@ -536,6 +537,7 @@ spec:
     - --service-account-private-key-file=/etc/kubernetes/ssl/apiserver-key.pem
     - --root-ca-file=/etc/kubernetes/ssl/ca.pem
     - --flex-volume-plugin-dir=/etc/kubernetes/volumeplugins
+    - --v=2
     resources:
       requests:
         cpu: 200m
@@ -590,6 +592,7 @@ spec:
     - scheduler
     - --master=http://127.0.0.1:8080
     - --leader-elect=true
+    - --v=2
     resources:
       requests:
         cpu: 100m
@@ -962,7 +965,7 @@ EOF
         echo "TEMPLATE: $TEMPLATE"
         mkdir -p $(dirname $TEMPLATE)
         cat << EOF > $TEMPLATE
-apiVersion: apps/v1beta1
+apiVersion: extensions/v1beta1
 kind: Deployment
 metadata:
   name: heapster-v1.5.1
@@ -985,11 +988,10 @@ spec:
         version: v1.5.1
       annotations:
         scheduler.alpha.kubernetes.io/critical-pod: ''
-        scheduler.alpha.kubernetes.io/tolerations: '[{"key":"CriticalAddonsOnly", "operator":"Exists"}]'
     spec:
       priorityClassName: system-cluster-critical
       containers:
-        - image: gcr.io/google_containers/heapster:v1.5.1
+        - image: k8s.gcr.io/heapster-amd64:v1.5.1
           name: heapster
           livenessProbe:
             httpGet:
@@ -1001,7 +1003,7 @@ spec:
           command:
             - /heapster
             - --source=kubernetes.summary_api:''
-        - image: gcr.io/google_containers/addon-resizer:2.1
+        - image: k8s.gcr.io/addon-resizer:1.8.1
           name: heapster-nanny
           resources:
             limits:
@@ -1019,10 +1021,14 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
+          volumeMounts:
+          - name: heapster-config-volume
+            mountPath: /etc/config
           command:
             - /pod_nanny
+            - --config-dir=/etc/config
             - --cpu=80m
-            - --extra-cpu=4m
+            - --extra-cpu=20m
             - --memory=200Mi
             - --extra-memory=4Mi
             - --threshold=5
@@ -1105,7 +1111,7 @@ EOF
         echo "TEMPLATE: $TEMPLATE"
         mkdir -p $(dirname $TEMPLATE)
         cat << EOF > $TEMPLATE
-apiVersion: apps/v1beta2
+apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: kubernetes-dashboard
@@ -1200,7 +1206,20 @@ kind: Secret
 metadata:
   labels:
     k8s-app: kubernetes-dashboard
+    # Allows editing resource and makes sure it is created first.
+    addonmanager.kubernetes.io/mode: EnsureExists
   name: kubernetes-dashboard-certs
+  namespace: kube-system
+type: Opaque
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  labels:
+    k8s-app: kubernetes-dashboard
+    # Allows editing resource and makes sure it is created first.
+    addonmanager.kubernetes.io/mode: EnsureExists
+  name: kubernetes-dashboard-key-holder
   namespace: kube-system
 type: Opaque
 EOF
@@ -1292,63 +1311,63 @@ metadata:
 EOF
     fi
 
-    local TEMPLATE=/etc/flannel/options.env
-    if [ ! -f $TEMPLATE ]; then
-        echo "TEMPLATE: $TEMPLATE"
-        mkdir -p $(dirname $TEMPLATE)
-        cat << EOF > $TEMPLATE
-FLANNELD_IFACE=$ADVERTISE_IP
-FLANNELD_ETCD_ENDPOINTS=$ETCD_ENDPOINTS
-EOF
-    fi
+#     local TEMPLATE=/etc/flannel/options.env
+#     if [ ! -f $TEMPLATE ]; then
+#         echo "TEMPLATE: $TEMPLATE"
+#         mkdir -p $(dirname $TEMPLATE)
+#         cat << EOF > $TEMPLATE
+# FLANNELD_IFACE=$ADVERTISE_IP
+# FLANNELD_ETCD_ENDPOINTS=$ETCD_ENDPOINTS
+# EOF
+#     fi
 
-    local TEMPLATE=/etc/systemd/system/flanneld.service.d/40-ExecStartPre-symlink.conf.conf
-    if [ ! -f $TEMPLATE ]; then
-        echo "TEMPLATE: $TEMPLATE"
-        mkdir -p $(dirname $TEMPLATE)
-        cat << EOF > $TEMPLATE
-[Service]
-ExecStartPre=/usr/bin/ln -sf /etc/flannel/options.env /run/flannel/options.env
-EOF
-    fi
+#     local TEMPLATE=/etc/systemd/system/flanneld.service.d/40-ExecStartPre-symlink.conf.conf
+#     if [ ! -f $TEMPLATE ]; then
+#         echo "TEMPLATE: $TEMPLATE"
+#         mkdir -p $(dirname $TEMPLATE)
+#         cat << EOF > $TEMPLATE
+# [Service]
+# ExecStartPre=/usr/bin/ln -sf /etc/flannel/options.env /run/flannel/options.env
+# EOF
+#     fi
 
-    local TEMPLATE=/etc/systemd/system/docker.service.d/40-flannel.conf
-    if [ ! -f $TEMPLATE ]; then
-        echo "TEMPLATE: $TEMPLATE"
-        mkdir -p $(dirname $TEMPLATE)
-        cat << EOF > $TEMPLATE
-[Unit]
-Requires=flanneld.service
-After=flanneld.service
-[Service]
-EnvironmentFile=/etc/kubernetes/cni/docker_opts_cni.env
-EOF
-    fi
+#     local TEMPLATE=/etc/systemd/system/docker.service.d/40-flannel.conf
+#     if [ ! -f $TEMPLATE ]; then
+#         echo "TEMPLATE: $TEMPLATE"
+#         mkdir -p $(dirname $TEMPLATE)
+#         cat << EOF > $TEMPLATE
+# [Unit]
+# Requires=flanneld.service
+# After=flanneld.service
+# [Service]
+# EnvironmentFile=/etc/kubernetes/cni/docker_opts_cni.env
+# EOF
+#     fi
 
-    local TEMPLATE=/etc/kubernetes/cni/docker_opts_cni.env
-    if [ ! -f $TEMPLATE ]; then
-        echo "TEMPLATE: $TEMPLATE"
-        mkdir -p $(dirname $TEMPLATE)
-        cat << EOF > $TEMPLATE
-DOCKER_OPT_BIP=""
-DOCKER_OPT_IPMASQ=""
-EOF
-    fi
+#     local TEMPLATE=/etc/kubernetes/cni/docker_opts_cni.env
+#     if [ ! -f $TEMPLATE ]; then
+#         echo "TEMPLATE: $TEMPLATE"
+#         mkdir -p $(dirname $TEMPLATE)
+#         cat << EOF > $TEMPLATE
+# DOCKER_OPT_BIP=""
+# DOCKER_OPT_IPMASQ=""
+# EOF
+#     fi
 
-    local TEMPLATE=/etc/kubernetes/cni/net.d/10-flannel.conf
-    if [ "${USE_CALICO}" = "false" ] && [ ! -f "${TEMPLATE}" ]; then
-        echo "TEMPLATE: $TEMPLATE"
-        mkdir -p $(dirname $TEMPLATE)
-        cat << EOF > $TEMPLATE
-{
-    "name": "podnet",
-    "type": "flannel",
-    "delegate": {
-        "isDefaultGateway": true
-    }
-}
-EOF
-    fi
+#     local TEMPLATE=/etc/kubernetes/cni/net.d/10-flannel.conf
+#     if [ "${USE_CALICO}" = "false" ] && [ ! -f "${TEMPLATE}" ]; then
+#         echo "TEMPLATE: $TEMPLATE"
+#         mkdir -p $(dirname $TEMPLATE)
+#         cat << EOF > $TEMPLATE
+# {
+#     "name": "podnet",
+#     "type": "flannel",
+#     "delegate": {
+#         "isDefaultGateway": true
+#     }
+# }
+# EOF
+#     fi
 
     local TEMPLATE=/srv/kubernetes/manifests/calico.yaml
     if [ "${USE_CALICO}" = "true" ]; then
@@ -1669,10 +1688,12 @@ fi
 
 systemctl enable kubelet; systemctl start kubelet
 
-start_flannel
+# start_flannel
 
 if [ $USE_CALICO = "true" ]; then
         start_calico
+else
+        start_flannel
 fi
 
 start_addons
