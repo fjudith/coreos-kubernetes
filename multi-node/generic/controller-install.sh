@@ -73,6 +73,8 @@ function init_config {
     done
 }
 
+
+# https://github.com/coreos/flannel/issues/535
 function init_flannel {
     echo "Waiting for etcd..."
     while true
