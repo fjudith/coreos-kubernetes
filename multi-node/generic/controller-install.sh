@@ -4,6 +4,9 @@ set -e
 # List of etcd servers (http://ip:port), comma separated
 export ETCD_ENDPOINTS=
 
+# Interface to be mapped
+export FLANNEL_IFACE=
+
 # Specify the version (vX.Y.Z) of Kubernetes assets to deploy
 # https://kubernetes.io/docs/reference/workloads-18-19/
 export K8S_VER=v1.9.3_coreos.0
@@ -227,7 +230,7 @@ spec:
         - /opt/bin/flanneld
         args:
         - --ip-masq
-        - --iface=eth1
+        - --iface=${FLANNEL_IFACE}
         #- --kube-subnet-mgr
         #- -v 10
         resources:

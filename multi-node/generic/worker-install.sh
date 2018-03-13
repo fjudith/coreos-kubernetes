@@ -4,6 +4,9 @@ set -e
 # List of etcd servers (http://ip:port), comma separated
 export ETCD_ENDPOINTS=
 
+# Interface to be mapped
+export FLANNEL_IFACE=
+
 # The endpoint the worker node should use to contact controller nodes (https://ip:port)
 # In HA configurations this should be an external DNS record or loadbalancer in front of the control nodes.
 # However, it is also possible to point directly to a single control node.
