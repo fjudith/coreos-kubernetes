@@ -49,8 +49,6 @@ fi
 
 # -------------
 
-
-
 function init_config {
     local REQUIRED=( 'ADVERTISE_IP' 'ETCD_ENDPOINTS' 'CONTROLLER_ENDPOINT' 'DNS_SERVICE_IP' 'K8S_VER' 'HYPERKUBE_IMAGE_REPO' 'USE_CALICO' )
     
@@ -239,6 +237,7 @@ spec:
     - --kubeconfig=/etc/kubernetes/worker-kubeconfig.yaml
     - --bind-address=${ADVERTISE_IP}
     - --logtostderr=true
+    - --masquerade-all
     - --v=2
     securityContext:
       privileged: true
@@ -269,32 +268,6 @@ spec:
     name: dbus
 EOF
     fi
-
-#     local TEMPLATE=/etc/cni/net.d/10-flannel.conflist
-#     if [ ! -f $TEMPLATE ]; then
-#         echo "TEMPLATE: $TEMPLATE"
-#         mkdir -p $(dirname $TEMPLATE)
-#         cat << EOF > $TEMPLATE
-# {
-#   "name": "cbr0",
-#   "plugins": [
-#     {
-#       "type": "flannel",
-#       "delegate": {
-#         "hairpinMode": true,
-#         "isDefaultGateway": true
-#       }
-#     },
-#     {
-#       "type": "portmap",
-#       "capabilities": {
-#         "portMappings": true
-#       }
-#     }
-#   ]
-# }
-# EOF
-#     fi
 
 #     local TEMPLATE=/etc/flannel/options.env
 #     if [ ! -f $TEMPLATE ]; then

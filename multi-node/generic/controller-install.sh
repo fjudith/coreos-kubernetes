@@ -225,6 +225,7 @@ spec:
         - /opt/bin/flanneld
         args:
         - --ip-masq
+        - --iface=eth1
         #- --kube-subnet-mgr
         #- -v 10
         resources:
@@ -428,6 +429,8 @@ spec:
     - proxy
     - --master=http://127.0.0.1:8080
     - --cluster-cidr=${POD_NETWORK}
+    - --masquerade-all
+    - --v=2
     securityContext:
       privileged: true
     volumeMounts:
@@ -1697,4 +1700,7 @@ else
 fi
 
 start_addons
+
+ip route add ${POD_NETWORK} dev flannel.1 scope global
+
 echo "DONE"
