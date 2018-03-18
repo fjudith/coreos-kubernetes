@@ -69,6 +69,10 @@ def provisionMachineSSL(machine,certBaseName,cn,ipAddrs)
   system('bash', '-c', "./../../lib/init-ssl.sh ssl #{certBaseName} #{cn} #{ipString}") or abort("failed generating #{cn} SSL artifacts")
   machine.vm.provision :file, :source => tarFile, :destination => "/tmp/ssl.tar"
   machine.vm.provision :shell, :inline => "mkdir -p /etc/kubernetes/ssl && tar -C /etc/kubernetes/ssl -xf /tmp/ssl.tar", :privileged => true
+  # Copy SSL CA Private Key for Kubernetes internal certificate signing
+  cakeyFile = "ssl/ca-key.pem"
+  machine.vm.provision :file, :source => cakeyFile, :destination => "/tmp/ca-key.pem"
+  machine.vm.provision :shell, :inline => "mv /tmp/ca-key.pem /etc/kubernetes/ssl/", :privileged => true
 end
 
 Vagrant.configure("2") do |config|
