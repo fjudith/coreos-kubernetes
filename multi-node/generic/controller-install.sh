@@ -9,7 +9,7 @@ export FLANNEL_IFACE=
 
 # Specify the version (vX.Y.Z) of Kubernetes assets to deploy
 # https://kubernetes.io/docs/reference/workloads-18-19/
-export K8S_VER=v1.9.6_coreos.0
+export K8S_VER=v1.10.0_coreos.0
 
 # Hyperkube image repository to use.
 export HYPERKUBE_IMAGE_REPO=quay.io/coreos/hyperkube
@@ -1321,64 +1321,6 @@ metadata:
 EOF
     fi
 
-#     local TEMPLATE=/etc/flannel/options.env
-#     if [ ! -f $TEMPLATE ]; then
-#         echo "TEMPLATE: $TEMPLATE"
-#         mkdir -p $(dirname $TEMPLATE)
-#         cat << EOF > $TEMPLATE
-# FLANNELD_IFACE=$ADVERTISE_IP
-# FLANNELD_ETCD_ENDPOINTS=$ETCD_ENDPOINTS
-# EOF
-#     fi
-
-#     local TEMPLATE=/etc/systemd/system/flanneld.service.d/40-ExecStartPre-symlink.conf.conf
-#     if [ ! -f $TEMPLATE ]; then
-#         echo "TEMPLATE: $TEMPLATE"
-#         mkdir -p $(dirname $TEMPLATE)
-#         cat << EOF > $TEMPLATE
-# [Service]
-# ExecStartPre=/usr/bin/ln -sf /etc/flannel/options.env /run/flannel/options.env
-# EOF
-#     fi
-
-#     local TEMPLATE=/etc/systemd/system/docker.service.d/40-flannel.conf
-#     if [ ! -f $TEMPLATE ]; then
-#         echo "TEMPLATE: $TEMPLATE"
-#         mkdir -p $(dirname $TEMPLATE)
-#         cat << EOF > $TEMPLATE
-# [Unit]
-# Requires=flanneld.service
-# After=flanneld.service
-# [Service]
-# EnvironmentFile=/etc/kubernetes/cni/docker_opts_cni.env
-# EOF
-#     fi
-
-#     local TEMPLATE=/etc/kubernetes/cni/docker_opts_cni.env
-#     if [ ! -f $TEMPLATE ]; then
-#         echo "TEMPLATE: $TEMPLATE"
-#         mkdir -p $(dirname $TEMPLATE)
-#         cat << EOF > $TEMPLATE
-# DOCKER_OPT_BIP=""
-# DOCKER_OPT_IPMASQ=""
-# EOF
-#     fi
-
-#     local TEMPLATE=/etc/kubernetes/cni/net.d/10-flannel.conf
-#     if [ "${USE_CALICO}" = "false" ] && [ ! -f "${TEMPLATE}" ]; then
-#         echo "TEMPLATE: $TEMPLATE"
-#         mkdir -p $(dirname $TEMPLATE)
-#         cat << EOF > $TEMPLATE
-# {
-#     "name": "podnet",
-#     "type": "flannel",
-#     "delegate": {
-#         "isDefaultGateway": true
-#     }
-# }
-# EOF
-#     fi
-
     local TEMPLATE=/srv/kubernetes/manifests/calico.yaml
     if [ "${USE_CALICO}" = "true" ]; then
     echo "TEMPLATE: $TEMPLATE"
@@ -1838,16 +1780,8 @@ function start_addons {
 
     echo
     echo "K8S: addon cluster admin"
-    #curl --silent -H "Content-Type: application/yaml" -XPOST -d"$(cat /srv/kubernetes/manifests/add-on-cluster-admin-crb.yaml)" "http://127.0.0.1:8080/apis/rbac.authorization.k8s.io/v1/clusterrolebindings" > /dev/null
     docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/add-on-cluster-admin-crb.yaml
     echo "K8S: DNS addon"
-    # curl --silent -H "Content-Type: application/yaml" -XPOST -d"$(cat /srv/kubernetes/manifests/kube-dns-de.yaml)" "http://127.0.0.1:8080/apis/extensions/v1beta1/namespaces/kube-system/deployments" > /dev/null
-    # curl --silent -H "Content-Type: application/yaml" -XPOST -d"$(cat /srv/kubernetes/manifests/kube-dns-svc.yaml)" "http://127.0.0.1:8080/api/v1/namespaces/kube-system/services" > /dev/null
-    # curl --silent -H "Content-Type: application/yaml" -XPOST -d"$(cat /srv/kubernetes/manifests/kube-dns-sa.yaml)" "http://127.0.0.1:8080/api/v1/namespaces/kube-system/secrets" > /dev/null
-    # curl --silent -H "Content-Type: application/yaml" -XPOST -d"$(cat /srv/kubernetes/manifests/kube-dns-cm.yaml)" "http://127.0.0.1:8080/api/v1/namespaces/kube-system/configMaps" > /dev/null
-    # curl --silent -H "Content-Type: application/yaml" -XPOST -d"$(cat /srv/kubernetes/manifests/kube-dns-autoscaler-de.yaml)" "http://127.0.0.1:8080/apis/apps/v1/namespaces/kube-system/deployments" > /dev/null
-    # curl --silent -H "Content-Type: application/yaml" -XPOST -d"$(cat /srv/kubernetes/manifests/kube-dns-autoscaler-sa.yaml)" "http://127.0.0.1:8080/api/v1/namespaces/kube-system/secrets" > /dev/null
-    # curl --silent -H "Content-Type: application/yaml" -XPOST -d"$(cat /srv/kubernetes/manifests/kube-dns-autoscaler-rbac.yaml)" "http://127.0.0.1:8080/apis/rbac.authorization.k8s.io/v1/clusterrolebindings" > /dev/null
     docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/kube-dns-svc.yaml
     docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/kube-dns-sa.yaml
     docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/kube-dns-cm.yaml
@@ -1856,21 +1790,11 @@ function start_addons {
     docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/kube-dns-autoscaler-rbac.yaml
     docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/kube-dns-autoscaler-de.yaml
     echo "K8S: Heapster addon"
-    # curl --silent -H "Content-Type: application/yaml" -XPOST -d"$(cat /srv/kubernetes/manifests/heapster-de.yaml)" "http://127.0.0.1:8080/apis/extensions/v1beta1/namespaces/kube-system/deployments" > /dev/null
-    # curl --silent -H "Content-Type: application/yaml" -XPOST -d"$(cat /srv/kubernetes/manifests/heapster-svc.yaml)" "http://127.0.0.1:8080/api/v1/namespaces/kube-system/services" > /dev/null
-    # curl --silent -H "Content-Type: application/yaml" -XPOST -d"$(cat /srv/kubernetes/manifests/heapster-sa.yaml)" "http://127.0.0.1:8080/api/v1/namespaces/kube-system/secrets" > /dev/null
-    # curl --silent -H "Content-Type: application/yaml" -XPOST -d"$(cat /srv/kubernetes/manifests/heapster-cm.yaml)" "http://127.0.0.1:8080/api/v1/namespaces/kube-system/configMaps" > /dev/null
     docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/heapster-svc.yaml
     docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/heapster-sa.yaml
     docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/heapster-cm.yaml
     docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/heapster-de.yaml
     echo "K8S: Dashboard addon"
-    # curl --silent -H "Content-Type: application/yaml" -XPOST -d"$(cat /srv/kubernetes/manifests/kube-dashboard-de.yaml)" "http://127.0.0.1:8080/apis/apps/v1/namespaces/kube-system/deployments" > /dev/null
-    # curl --silent -H "Content-Type: application/yaml" -XPOST -d"$(cat /srv/kubernetes/manifests/kube-dashboard-svc.yaml)" "http://127.0.0.1:8080/api/v1/namespaces/kube-system/services" > /dev/null
-    # curl --silent -H "Content-Type: application/yaml" -XPOST -d"$(cat /srv/kubernetes/manifests/kube-dashboard-sec.yaml)" "http://127.0.0.1:8080/api/v1/namespaces/kube-system/secrets" > /dev/null
-    # curl --silent -H "Content-Type: application/yaml" -XPOST -d"$(cat /srv/kubernetes/manifests/kube-dashboard-sa.yaml)" "http://127.0.0.1:8080/api/v1/namespaces/kube-system/secrets" > /dev/null
-    # curl --silent -H "Content-Type: application/yaml" -XPOST -d"$(cat /srv/kubernetes/manifests/kube-dashboard-rbac.yaml)" "http://127.0.0.1:8080/apis/rbac.authorization.k8s.io/v1/clusterrolebindings" > /dev/null
-    # curl --silent -H "Content-Type: application/yaml" -XPOST -d"$(cat /srv/kubernetes/manifests/kube-dashboard-cm.yaml)" "http://127.0.0.1:8080/api/v1/namespaces/kube-system/configMaps" > /dev/null
     docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/kube-dashboard-sa.yaml
     docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/kube-dashboard-rbac.yaml
     docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/kube-dashboard-sec.yaml
@@ -1948,8 +1872,6 @@ if [ $CONTAINER_RUNTIME = "rkt" ]; then
         systemctl enable rkt-api
 fi
 
-#systemctl enable flanneld; systemctl start flanneld
-
 systemctl enable kubelet; systemctl start kubelet
 
 # start_flannel
@@ -1961,7 +1883,5 @@ else
 fi
 
 start_addons
-
-# ip route add ${POD_NETWORK} dev flannel.1 scope global
 
 echo "DONE"

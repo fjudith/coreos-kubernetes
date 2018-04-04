@@ -15,7 +15,7 @@ export CONTROLLER_ENDPOINT=
 # Specify the version (vX.Y.Z) of Kubernetes assets to deploy
 # https://kubernetes.io/docs/reference/workloads-18-19/
 # https://nixaid.com/deploying-kubernetes-cluster-from-scratch/
-export K8S_VER=v1.9.6_coreos.0
+export K8S_VER=v1.10.0_coreos.0
 
 # Hyperkube image repository to use.
 export HYPERKUBE_IMAGE_REPO=quay.io/coreos/hyperkube
@@ -272,64 +272,6 @@ spec:
 EOF
     fi
 
-#     local TEMPLATE=/etc/flannel/options.env
-#     if [ ! -f $TEMPLATE ]; then
-#         echo "TEMPLATE: $TEMPLATE"
-#         mkdir -p $(dirname $TEMPLATE)
-#         cat << EOF > $TEMPLATE
-# FLANNELD_IFACE=$ADVERTISE_IP
-# FLANNELD_ETCD_ENDPOINTS=$ETCD_ENDPOINTS
-# EOF
-#     fi
-
-#     local TEMPLATE=/etc/systemd/system/flanneld.service.d/40-ExecStartPre-symlink.conf.conf
-#     if [ ! -f $TEMPLATE ]; then
-#         echo "TEMPLATE: $TEMPLATE"
-#         mkdir -p $(dirname $TEMPLATE)
-#         cat << EOF > $TEMPLATE
-# [Service]
-# ExecStartPre=/usr/bin/ln -sf /etc/flannel/options.env /run/flannel/options.env
-# EOF
-#     fi
-
-#     local TEMPLATE=/etc/systemd/system/docker.service.d/40-flannel.conf
-#     if [ ! -f $TEMPLATE ]; then
-#         echo "TEMPLATE: $TEMPLATE"
-#         mkdir -p $(dirname $TEMPLATE)
-#         cat << EOF > $TEMPLATE
-# [Unit]
-# Requires=flanneld.service
-# After=flanneld.service
-# [Service]
-# EnvironmentFile=/etc/kubernetes/cni/docker_opts_cni.env
-# EOF
-#     fi
-
-#     local TEMPLATE=/etc/kubernetes/cni/docker_opts_cni.env
-#     if [ ! -f $TEMPLATE ]; then
-#         echo "TEMPLATE: $TEMPLATE"
-#         mkdir -p $(dirname $TEMPLATE)
-#         cat << EOF > $TEMPLATE
-# DOCKER_OPT_BIP=""
-# DOCKER_OPT_IPMASQ=""
-# EOF
-#     fi
-
-#     local TEMPLATE=/etc/kubernetes/cni/net.d/10-flannel.conf
-#     if [ "${USE_CALICO}" = "false" ] && [ ! -f "${TEMPLATE}" ]; then
-#         echo "TEMPLATE: $TEMPLATE"
-#         mkdir -p $(dirname $TEMPLATE)
-#         cat << EOF > $TEMPLATE
-# {
-#     "name": "podnet",
-#     "type": "flannel",
-#     "delegate": {
-#         "isDefaultGateway": true
-#     }
-# }
-# EOF
-#     fi
-
 }
 
 init_config
@@ -345,8 +287,5 @@ if [ $CONTAINER_RUNTIME = "rkt" ]; then
         systemctl enable load-rkt-stage1
         systemctl enable rkt-api
 fi
-
-# systemctl enable flanneld; systemctl start flanneld
-
 
 systemctl enable kubelet; systemctl start kubelet
