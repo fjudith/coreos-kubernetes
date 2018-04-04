@@ -92,7 +92,7 @@ Restart=on-failure
 RestartSec=10s
 TimeoutStartSec=0
 LimitNOFILE=40000
-Environment="ETCD_IMAGE_TAG=v3.2.11"
+Environment="ETCD_IMAGE_TAG=v3.2.15"
 Environment="ETCD_NAME=%m"
 Environment="ETCD_USER=etcd"
 Environment="ETCD_DATA_DIR=/var/lib/etcd"
