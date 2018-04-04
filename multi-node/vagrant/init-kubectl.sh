@@ -5,3 +5,4 @@ kubectl config set-credentials vagrant-multi-admin --certificate-authority=${PWD
 kubectl config set-context vagrant-multi --cluster=vagrant-multi-cluster --user=vagrant-multi-admin
 kubectl config use-context vagrant-multi
 kubectl get nodes
+kubectl cluster-info
