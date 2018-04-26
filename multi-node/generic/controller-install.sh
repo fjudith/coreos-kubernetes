@@ -9,7 +9,7 @@ export FLANNEL_IFACE=
 
 # Specify the version (vX.Y.Z) of Kubernetes assets to deploy
 # https://kubernetes.io/docs/reference/workloads-18-19/
-export K8S_VER=v1.10.0_coreos.0
+export K8S_VER=v1.10.1_coreos.0
 
 # Hyperkube image repository to use.
 export HYPERKUBE_IMAGE_REPO=quay.io/coreos/hyperkube

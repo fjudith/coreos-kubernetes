@@ -1,3 +1,7 @@
+## v0.10.0
+- Bump Kubernetes version from 1.9.6 to 1.10.0
+
+
 ## v0.9.0
 - Bump Kubernetes version from v1.7.3 to v1.9.3
 - Replace flanneld service by kube-flannel daemonset
