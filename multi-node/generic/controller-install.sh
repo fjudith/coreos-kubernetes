@@ -897,7 +897,7 @@ spec:
           - --namespace=kube-system
           - --configmap=kube-dns-autoscaler
           # Should keep target in sync with cluster/addons/dns/kube-dns.yaml.base
-          - --target={{.Target}}
+          - --target=Deployment/kube-dns
           # When cluster is using large nodes(with more cores), "coresPerReplica" should dominate.
           # If using small nodes, "nodesPerReplica" should dominate.
           - --default-params={"linear":{"coresPerReplica":256,"nodesPerReplica":16,"preventSinglePointFailure":true}}
