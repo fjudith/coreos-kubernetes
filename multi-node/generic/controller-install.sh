@@ -681,7 +681,7 @@ spec:
           optional: true
       containers:
       - name: kubedns
-        image: k8s.gcr.io/k8s-dns-kube-dns-amd64:1.14.8
+        image: k8s.gcr.io/k8s-dns-kube-dns-amd64:1.14.10
         resources:
           # TODO: Set memory limits when we've profiled the container for large
           # clusters, then set request = limit to keep this container in
@@ -732,7 +732,7 @@ spec:
         - name: kube-dns-config
           mountPath: /kube-dns-config
       - name: dnsmasq
-        image: k8s.gcr.io/k8s-dns-dnsmasq-nanny-amd64:1.14.8
+        image: k8s.gcr.io/k8s-dns-dnsmasq-nanny-amd64:1.14.10
         livenessProbe:
           httpGet:
             path: /healthcheck/dnsmasq
@@ -771,7 +771,7 @@ spec:
         - name: kube-dns-config
           mountPath: /etc/k8s/dns/dnsmasq-nanny
       - name: sidecar
-        image: k8s.gcr.io/k8s-dns-sidecar-amd64:1.14.8
+        image: k8s.gcr.io/k8s-dns-sidecar-amd64:1.14.10
         livenessProbe:
           httpGet:
             path: /metrics
@@ -864,7 +864,7 @@ EOF
         echo "TEMPLATE: $TEMPLATE"
         mkdir -p $(dirname $TEMPLATE)
         cat << EOF > $TEMPLATE
-apiVersion: apps/v1beta2
+apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: kube-dns-autoscaler
@@ -883,7 +883,6 @@ spec:
         k8s-app: kube-dns-autoscaler
       annotations:
         scheduler.alpha.kubernetes.io/critical-pod: ''
-        scheduler.alpha.kubernetes.io/tolerations: '[{"key":"CriticalAddonsOnly", "operator":"Exists"}]'
     spec:
       priorityClassName: system-cluster-critical
       containers:
@@ -898,7 +897,7 @@ spec:
           - --namespace=kube-system
           - --configmap=kube-dns-autoscaler
           # Should keep target in sync with cluster/addons/dns/kube-dns.yaml.base
-          - --target=Deployment/kube-dns
+          - --target={{.Target}}
           # When cluster is using large nodes(with more cores), "coresPerReplica" should dominate.
           # If using small nodes, "nodesPerReplica" should dominate.
           - --default-params={"linear":{"coresPerReplica":256,"nodesPerReplica":16,"preventSinglePointFailure":true}}
@@ -978,30 +977,30 @@ EOF
 apiVersion: extensions/v1beta1
 kind: Deployment
 metadata:
-  name: heapster-v1.5.1
+  name: heapster-v1.5.2
   namespace: kube-system
   labels:
     k8s-app: heapster
     kubernetes.io/cluster-service: "true"
     addonmanager.kubernetes.io/mode: Reconcile
-    version: v1.5.1
+    version: v1.5.2
 spec:
   replicas: 1
   selector:
     matchLabels:
       k8s-app: heapster
-      version: v1.5.1
+      version: v1.5.2
   template:
     metadata:
       labels:
         k8s-app: heapster
-        version: v1.5.1
+        version: v1.5.2
       annotations:
         scheduler.alpha.kubernetes.io/critical-pod: ''
     spec:
       priorityClassName: system-cluster-critical
       containers:
-        - image: k8s.gcr.io/heapster-amd64:v1.5.1
+        - image: k8s.gcr.io/heapster-amd64:v1.5.2
           name: heapster
           livenessProbe:
             httpGet:
@@ -1042,7 +1041,7 @@ spec:
             - --memory=200Mi
             - --extra-memory=4Mi
             - --threshold=5
-            - --deployment=heapster-v1.5.1
+            - --deployment=heapster-v1.5.2
             - --container=heapster
             - --poll-period=300000
             - --estimator=exponential
