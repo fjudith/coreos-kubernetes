@@ -38,6 +38,8 @@ export K8S_SERVICE_IP=10.3.0.1
 # This same IP must be configured on all worker nodes to enable DNS service discovery.
 export DNS_SERVICE_IP=10.3.0.10
 
+export DNS_DOMAIN=cluster.local
+
 # Whether to use Calico for Kubernetes network policy.
 export USE_CALICO=false
 
@@ -636,29 +638,119 @@ subjects:
 EOF
     fi
 
-    local TEMPLATE=/srv/kubernetes/manifests/kube-dns-de.yaml
+    local TEMPLATE=/srv/kubernetes/manifests/coredns-sa.yaml
     if [ ! -f $TEMPLATE ]; then
         echo "TEMPLATE: $TEMPLATE"
         mkdir -p $(dirname $TEMPLATE)
         cat << EOF > $TEMPLATE
-apiVersion: apps/v1beta1
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: coredns
+  namespace: kube-system
+  labels:
+      kubernetes.io/cluster-service: "true"
+      addonmanager.kubernetes.io/mode: Reconcile
+EOF
+    fi
+
+    local TEMPLATE=/srv/kubernetes/manifests/coredns-rbac.yaml
+    if [ ! -f $TEMPLATE ]; then
+        echo "TEMPLATE: $TEMPLATE"
+        mkdir -p $(dirname $TEMPLATE)
+        cat << EOF > $TEMPLATE
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    kubernetes.io/bootstrapping: rbac-defaults
+    addonmanager.kubernetes.io/mode: Reconcile
+  name: system:coredns
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - endpoints
+  - services
+  - pods
+  - namespaces
+  verbs:
+  - list
+  - watch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  annotations:
+    rbac.authorization.kubernetes.io/autoupdate: "true"
+  labels:
+    kubernetes.io/bootstrapping: rbac-defaults
+    addonmanager.kubernetes.io/mode: EnsureExists
+  name: system:coredns
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:coredns
+subjects:
+- kind: ServiceAccount
+  name: coredns
+  namespace: kube-system
+EOF
+    fi
+
+    local TEMPLATE=/srv/kubernetes/manifests/coredns-cm.yaml
+    if [ ! -f $TEMPLATE ]; then
+        echo "TEMPLATE: $TEMPLATE"
+        mkdir -p $(dirname $TEMPLATE)
+        cat << EOF > $TEMPLATE
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: coredns
+  namespace: kube-system
+  labels:
+      addonmanager.kubernetes.io/mode: EnsureExists
+data:
+  Corefile: |
+    .:53 {
+        errors
+        health
+        kubernetes $DNS_DOMAIN in-addr.arpa ip6.arpa {
+            pods insecure
+            upstream
+            fallthrough in-addr.arpa ip6.arpa
+        }
+        prometheus :9153
+        proxy . /etc/resolv.conf
+        cache 30
+    }
+EOF
+    fi
+
+    local TEMPLATE=/srv/kubernetes/manifests/coredns-de.yaml
+    if [ ! -f $TEMPLATE ]; then
+        echo "TEMPLATE: $TEMPLATE"
+        mkdir -p $(dirname $TEMPLATE)
+        cat << EOF > $TEMPLATE
+apiVersion: extensions/v1beta1
 kind: Deployment
 metadata:
-  name: kube-dns
+  name: coredns
   namespace: kube-system
   labels:
     k8s-app: kube-dns
     kubernetes.io/cluster-service: "true"
     addonmanager.kubernetes.io/mode: Reconcile
+    kubernetes.io/name: "CoreDNS"
 spec:
   # replicas: not specified here:
   # 1. In order to make Addon Manager do not reconcile this replicas parameter.
   # 2. Default is 1.
   # 3. Will be tuned in real time if DNS horizontal auto-scaling is turned on.
   strategy:
+    type: RollingUpdate
     rollingUpdate:
-      maxSurge: 10%
-      maxUnavailable: 0
+      maxUnavailable: 1
   selector:
     matchLabels:
       k8s-app: kube-dns
@@ -666,95 +758,27 @@ spec:
     metadata:
       labels:
         k8s-app: kube-dns
-      annotations:
-        scheduler.alpha.kubernetes.io/critical-pod: ''
-        scheduler.alpha.kubernetes.io/tolerations: '[{"key":"CriticalAddonsOnly", "operator":"Exists"}]'
     spec:
-      priorityClassName: system-cluster-critical
+      serviceAccountName: coredns
       tolerations:
-      - key: "CriticalAddonsOnly"
-        operator: "Exists"
-      volumes:
-      - name: kube-dns-config
-        configMap:
-          name: kube-dns
-          optional: true
+        - key: node-role.kubernetes.io/master
+          effect: NoSchedule
+        - key: "CriticalAddonsOnly"
+          operator: "Exists"
       containers:
-      - name: kubedns
-        image: k8s.gcr.io/k8s-dns-kube-dns-amd64:1.14.10
+      - name: coredns
+        image: coredns/coredns:1.0.6
+        imagePullPolicy: IfNotPresent
         resources:
-          # TODO: Set memory limits when we've profiled the container for large
-          # clusters, then set request = limit to keep this container in
-          # guaranteed class. Currently, this container falls into the
-          # "burstable" category so the kubelet doesn't backoff from restarting it.
           limits:
             memory: 170Mi
           requests:
             cpu: 100m
             memory: 70Mi
-        livenessProbe:
-          httpGet:
-            path: /healthcheck/kubedns
-            port: 10054
-            scheme: HTTP
-          initialDelaySeconds: 60
-          timeoutSeconds: 5
-          successThreshold: 1
-          failureThreshold: 5
-        readinessProbe:
-          httpGet:
-            path: /readiness
-            port: 8081
-            scheme: HTTP
-          # we poll on pod startup for the Kubernetes master service and
-          # only setup the /readiness HTTP server once that's available.
-          initialDelaySeconds: 3
-          timeoutSeconds: 5
-        args:
-        - --domain=cluster.local.
-        - --dns-port=10053
-        - --config-dir=/kube-dns-config
-        - --v=2
-        env:
-        - name: PROMETHEUS_PORT
-          value: "10055"
-        ports:
-        - containerPort: 10053
-          name: dns-local
-          protocol: UDP
-        - containerPort: 10053
-          name: dns-tcp-local
-          protocol: TCP
-        - containerPort: 10055
-          name: metrics
-          protocol: TCP
+        args: [ "-conf", "/etc/coredns/Corefile" ]
         volumeMounts:
-        - name: kube-dns-config
-          mountPath: /kube-dns-config
-      - name: dnsmasq
-        image: k8s.gcr.io/k8s-dns-dnsmasq-nanny-amd64:1.14.10
-        livenessProbe:
-          httpGet:
-            path: /healthcheck/dnsmasq
-            port: 10054
-            scheme: HTTP
-          initialDelaySeconds: 60
-          timeoutSeconds: 5
-          successThreshold: 1
-          failureThreshold: 5
-        args:
-        - -v=2
-        - -logtostderr
-        - -configDir=/etc/k8s/dns/dnsmasq-nanny
-        - -restartDnsmasq=true
-        - --
-        - -k
-        - --cache-size=1000
-        - --no-negcache
-        - --log-facility=-
-        - --server=/cluster.local/127.0.0.1#10053
-        - --server=/in-addr.arpa/127.0.0.1#10053
-        - --server=/ip6.arpa/127.0.0.1#10053
+        - name: config-volume
+          mountPath: /etc/coredns
         ports:
         - containerPort: 53
           name: dns
@@ -762,44 +786,27 @@ spec:
         - containerPort: 53
           name: dns-tcp
           protocol: TCP
-        # see: https://github.com/kubernetes/kubernetes/issues/29055 for details
-        resources:
-          requests:
-            cpu: 150m
-            memory: 20Mi
-        volumeMounts:
-        - name: kube-dns-config
-          mountPath: /etc/k8s/dns/dnsmasq-nanny
-      - name: sidecar
-        image: k8s.gcr.io/k8s-dns-sidecar-amd64:1.14.10
         livenessProbe:
           httpGet:
-            path: /metrics
-            port: 10054
+            path: /health
+            port: 8080
             scheme: HTTP
           initialDelaySeconds: 60
           timeoutSeconds: 5
           successThreshold: 1
           failureThreshold: 5
-        args:
-        - --v=2
-        - --logtostderr
-        - --probe=kubedns,127.0.0.1:10053,kubernetes.default.svc.cluster.local,5,SRV
-        - --probe=dnsmasq,127.0.0.1:53,kubernetes.default.svc.cluster.local,5,SRV
-        ports:
-        - containerPort: 10054
-          name: metrics
-          protocol: TCP
-        resources:
-          requests:
-            memory: 20Mi
-            cpu: 10m
-      dnsPolicy: Default  # Don't use cluster DNS.
-      serviceAccountName: kube-dns
+      dnsPolicy: Default
+      volumes:
+        - name: config-volume
+          configMap:
+            name: coredns
+            items:
+            - key: Corefile
+              path: Corefile
 EOF
     fi
 
-    local TEMPLATE=/srv/kubernetes/manifests/kube-dns-svc.yaml
+    local TEMPLATE=/srv/kubernetes/manifests/coredns-svc.yaml
     if [ ! -f $TEMPLATE ]; then
         echo "TEMPLATE: $TEMPLATE"
         mkdir -p $(dirname $TEMPLATE)
@@ -813,7 +820,7 @@ metadata:
     k8s-app: kube-dns
     kubernetes.io/cluster-service: "true"
     addonmanager.kubernetes.io/mode: Reconcile
-    kubernetes.io/name: "KubeDNS"
+    kubernetes.io/name: "CoreDNS"
 spec:
   selector:
     k8s-app: kube-dns
@@ -828,43 +835,12 @@ spec:
 EOF
     fi
 
-    local TEMPLATE=/srv/kubernetes/manifests/kube-dns-sa.yaml
-    if [ ! -f $TEMPLATE ]; then
-        echo "TEMPLATE: $TEMPLATE"
-        mkdir -p $(dirname $TEMPLATE)
-        cat << EOF > $TEMPLATE
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: kube-dns
-  namespace: kube-system
-  labels:
-    kubernetes.io/cluster-service: "true"
-    addonmanager.kubernetes.io/mode: Reconcile
-EOF
-    fi
-
-    local TEMPLATE=/srv/kubernetes/manifests/kube-dns-cm.yaml
-    if [ ! -f $TEMPLATE ]; then
-        echo "TEMPLATE: $TEMPLATE"
-        mkdir -p $(dirname $TEMPLATE)
-        cat << EOF > $TEMPLATE
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: kube-dns
-  namespace: kube-system
-  labels:
-    addonmanager.kubernetes.io/mode: EnsureExists
-EOF
-    fi
-
     local TEMPLATE=/srv/kubernetes/manifests/kube-dns-autoscaler-de.yaml
     if [ ! -f $TEMPLATE ]; then
         echo "TEMPLATE: $TEMPLATE"
         mkdir -p $(dirname $TEMPLATE)
         cat << EOF > $TEMPLATE
-apiVersion: apps/v1beta2
+apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: kube-dns-autoscaler
@@ -883,7 +859,6 @@ spec:
         k8s-app: kube-dns-autoscaler
       annotations:
         scheduler.alpha.kubernetes.io/critical-pod: ''
-        scheduler.alpha.kubernetes.io/tolerations: '[{"key":"CriticalAddonsOnly", "operator":"Exists"}]'
     spec:
       priorityClassName: system-cluster-critical
       containers:
@@ -978,30 +953,30 @@ EOF
 apiVersion: extensions/v1beta1
 kind: Deployment
 metadata:
-  name: heapster-v1.5.1
+  name: heapster-v1.5.2
   namespace: kube-system
   labels:
     k8s-app: heapster
     kubernetes.io/cluster-service: "true"
     addonmanager.kubernetes.io/mode: Reconcile
-    version: v1.5.1
+    version: v1.5.2
 spec:
   replicas: 1
   selector:
     matchLabels:
       k8s-app: heapster
-      version: v1.5.1
+      version: v1.5.2
   template:
     metadata:
       labels:
         k8s-app: heapster
-        version: v1.5.1
+        version: v1.5.2
       annotations:
         scheduler.alpha.kubernetes.io/critical-pod: ''
     spec:
       priorityClassName: system-cluster-critical
       containers:
-        - image: k8s.gcr.io/heapster-amd64:v1.5.1
+        - image: k8s.gcr.io/heapster-amd64:v1.5.2
           name: heapster
           livenessProbe:
             httpGet:
@@ -1042,7 +1017,7 @@ spec:
             - --memory=200Mi
             - --extra-memory=4Mi
             - --threshold=5
-            - --deployment=heapster-v1.5.1
+            - --deployment=heapster-v1.5.2
             - --container=heapster
             - --poll-period=300000
             - --estimator=exponential
@@ -1782,10 +1757,11 @@ function start_addons {
     echo "K8S: addon cluster admin"
     docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/add-on-cluster-admin-crb.yaml
     echo "K8S: DNS addon"
-    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/kube-dns-svc.yaml
-    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/kube-dns-sa.yaml
-    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/kube-dns-cm.yaml
-    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/kube-dns-de.yaml
+    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/coredns-svc.yaml
+    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/coredns-sa.yaml
+    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/coredns-cm.yaml
+    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/coredns-rbac.yaml
+    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/coredns-de.yaml
     docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/kube-dns-autoscaler-sa.yaml
     docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/kube-dns-autoscaler-rbac.yaml
     docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/kube-dns-autoscaler-de.yaml
