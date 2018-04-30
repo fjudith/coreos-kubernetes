@@ -9,7 +9,7 @@ export FLANNEL_IFACE=
 
 # Specify the version (vX.Y.Z) of Kubernetes assets to deploy
 # https://kubernetes.io/docs/reference/workloads-18-19/
-export K8S_VER=v1.10.1_coreos.0
+export K8S_VER=v1.10.2_coreos.0
 
 # Hyperkube image repository to use.
 export HYPERKUBE_IMAGE_REPO=quay.io/coreos/hyperkube
@@ -312,6 +312,8 @@ ExecStartPre=/usr/bin/mkdir -p /var/log/containers
 ExecStartPre=/usr/bin/mkdir -p /var/lib/kubelet/volumeplugins
 ExecStartPre=/usr/bin/mkdir -p /var/lib/rook
 ExecStartPre=-/usr/bin/rkt rm --uuid-file=${uuid_file}
+ExecStartPre=/bin/mkdir -p /var/lib/kubelet/volumeplugins
+ExecStartPre=/bin/mkdir -p /var/lib/rook
 ExecStart=/usr/lib/coreos/kubelet-wrapper \
   --kubeconfig=/etc/kubernetes/master-kubeconfig.yaml \
   --register-schedulable=false \

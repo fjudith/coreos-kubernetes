@@ -15,7 +15,7 @@ export CONTROLLER_ENDPOINT=
 # Specify the version (vX.Y.Z) of Kubernetes assets to deploy
 # https://kubernetes.io/docs/reference/workloads-18-19/
 # https://nixaid.com/deploying-kubernetes-cluster-from-scratch/
-export K8S_VER=v1.10.1_coreos.0
+export K8S_VER=v1.10.2_coreos.0
 
 # Hyperkube image repository to use.
 export HYPERKUBE_IMAGE_REPO=quay.io/coreos/hyperkube
@@ -105,8 +105,8 @@ ExecStartPre=/usr/bin/mkdir -p /var/log/containers
 ExecStartPre=-/usr/bin/rkt rm --uuid-file=${uuid_file}
 ExecStartPre=/usr/bin/mkdir -p /opt/cni/bin
 ExecStartPre=/usr/bin/mkdir -p /etc/cni/net.d
-ExecStartPre=/usr/bin/mkdir -p /var/lib/kubelet/volumeplugins
-ExecStartPre=/usr/bin/mkdir -p /var/lib/rook
+ExecStartPre=/bin/mkdir -p /var/lib/kubelet/volumeplugins
+ExecStartPre=/bin/mkdir -p /var/lib/rook
 ExecStart=/usr/lib/coreos/kubelet-wrapper \
   --cni-conf-dir=/etc/cni/net.d \
   --cni-bin-dir=/opt/cni/bin \
