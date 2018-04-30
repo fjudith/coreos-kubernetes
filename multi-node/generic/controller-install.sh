@@ -312,8 +312,8 @@ ExecStartPre=/usr/bin/mkdir -p /var/log/containers
 ExecStartPre=/usr/bin/mkdir -p /var/lib/kubelet/volumeplugins
 ExecStartPre=/usr/bin/mkdir -p /var/lib/rook
 ExecStartPre=-/usr/bin/rkt rm --uuid-file=${uuid_file}
-ExecStartPre=/bin/mkdir -p /var/lib/kubelet/volumeplugins
-ExecStartPre=/bin/mkdir -p /var/lib/rook
+ExecStartPre=/usr/bin/mkdir -p /var/lib/kubelet/volumeplugins
+ExecStartPre=/usr/bin/mkdir -p /var/lib/rook
 ExecStart=/usr/lib/coreos/kubelet-wrapper \
   --kubeconfig=/etc/kubernetes/master-kubeconfig.yaml \
   --register-schedulable=false \
