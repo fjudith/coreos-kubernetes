@@ -122,7 +122,9 @@ ExecStart=/usr/lib/coreos/kubelet-wrapper \
   --kubeconfig=/etc/kubernetes/worker-kubeconfig.yaml \
   --tls-cert-file=/etc/kubernetes/ssl/worker.pem \
   --tls-private-key-file=/etc/kubernetes/ssl/worker-key.pem \
-  --volume-plugin-dir=/etc/kubernetes/volumeplugins
+  --volume-plugin-dir=/etc/kubernetes/volumeplugins \
+  --authentication-token-webhook=true \
+  --authorization-mode=Webhook \
   --v=2
 ExecStop=-/usr/bin/rkt stop --uuid-file=${uuid_file}
 Restart=always

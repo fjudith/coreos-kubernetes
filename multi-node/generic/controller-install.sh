@@ -325,7 +325,10 @@ ExecStart=/usr/lib/coreos/kubelet-wrapper \
   --hostname-override=${ADVERTISE_IP} \
   --cluster_dns=${DNS_SERVICE_IP} \
   --cluster_domain=cluster.local \
-  --volume-plugin-dir=/etc/kubernetes/volumeplugins
+  --volume-plugin-dir=/etc/kubernetes/volumeplugins \
+  --authentication-token-webhook=true \
+  --authorization-mode=Webhook \
+  --v=2
 ExecStop=-/usr/bin/rkt stop --uuid-file=${uuid_file}
 Restart=always
 RestartSec=10
@@ -721,6 +724,7 @@ data:
             pods insecure
             upstream
             fallthrough in-addr.arpa ip6.arpa
+            endpoint ${ETCD_ENDPOINTS//[\,]/" "}
         }
         prometheus :9153
         proxy . /etc/resolv.conf
