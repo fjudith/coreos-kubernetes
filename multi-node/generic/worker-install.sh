@@ -108,6 +108,7 @@ ExecStartPre=/usr/bin/mkdir -p /etc/cni/net.d
 ExecStartPre=/usr/bin/mkdir -p /var/lib/kubelet/volumeplugins
 ExecStartPre=/usr/bin/mkdir -p /var/lib/rook
 ExecStart=/usr/lib/coreos/kubelet-wrapper \
+  --node-labels=kubernetes.io/role=node \
   --cni-conf-dir=/etc/cni/net.d \
   --cni-bin-dir=/opt/cni/bin \
   --network-plugin=cni \
@@ -119,7 +120,9 @@ ExecStart=/usr/lib/coreos/kubelet-wrapper \
   --hostname-override=${ADVERTISE_IP} \
   --cluster_dns=${DNS_SERVICE_IP} \
   --cluster_domain=cluster.local \
-  --kubeconfig=/etc/kubernetes/worker-kubeconfig.yaml \
+  --kubeconfig=/etc/kubernetes/kubelet.kubeconfig \
+  --require-kubeconfig \
+  --bootstrap-kubeconfig=/etc/kubernetes/bootstrap.kubeconfig \
   --tls-cert-file=/etc/kubernetes/ssl/worker.pem \
   --tls-private-key-file=/etc/kubernetes/ssl/worker-key.pem \
   --volume-plugin-dir=/etc/kubernetes/volumeplugins \
@@ -193,7 +196,7 @@ RequiredBy=kubelet.service
 EOF
     fi
 
-    local TEMPLATE=/etc/kubernetes/worker-kubeconfig.yaml
+    local TEMPLATE=/etc/kubernetes/kubelet.kubeconfig
     if [ ! -f $TEMPLATE ]; then
         echo "TEMPLATE: $TEMPLATE"
         mkdir -p $(dirname $TEMPLATE)
@@ -214,8 +217,59 @@ contexts:
 - context:
     cluster: local
     user: kubelet
-  name: kubelet-context
-current-context: kubelet-context
+  name: default
+current-context: default
+EOF
+    fi
+
+    local TEMPLATE=/etc/kubernetes/bootstrap.kubeconfig
+    if [ ! -f $TEMPLATE ]; then
+        echo "TEMPLATE: $TEMPLATE"
+        mkdir -p $(dirname $TEMPLATE)
+        cat << EOF > $TEMPLATE
+apiVersion: v1
+kind: Config
+clusters:
+- name: local
+  cluster:
+    server: ${CONTROLLER_ENDPOINT}
+    certificate-authority: /etc/kubernetes/ssl/ca.pem
+users:
+- name: kubelet-bootstrap
+  user:
+    token: $(cat /etc/kubernetes/token.csv | awk -F ',' '{print $1}')
+contexts:
+- context:
+    cluster: local
+    user: kubelet-bootstrap
+  name: default
+current-context: default
+EOF
+    fi
+
+    local TEMPLATE=/etc/kubernetes/kube-proxy.kubeconfig
+    if [ ! -f $TEMPLATE ]; then
+        echo "TEMPLATE: $TEMPLATE"
+        mkdir -p $(dirname $TEMPLATE)
+        cat << EOF > $TEMPLATE
+apiVersion: v1
+kind: Config
+clusters:
+- name: local
+  cluster:
+    server: ${CONTROLLER_ENDPOINT}
+    certificate-authority: /etc/kubernetes/ssl/ca.pem
+users:
+- name: kube-proxy
+  user:
+    client-certificate: /etc/kubernetes/ssl/kube-proxy.pem
+    client-key: /etc/kubernetes/ssl/kube-proxy-key.pem
+contexts:
+- context:
+    cluster: local
+    user: kube-proxy
+  name: default
+current-context: default
 EOF
     fi
 
@@ -241,7 +295,7 @@ spec:
     - proxy
     - --master=${CONTROLLER_ENDPOINT}
     - --cluster-cidr=${POD_NETWORK}
-    - --kubeconfig=/etc/kubernetes/worker-kubeconfig.yaml
+    - --kubeconfig=/etc/kubernetes/kube-proxy.kubeconfig
     - --bind-address=${ADVERTISE_IP}
     - --logtostderr=true
     - --masquerade-all
@@ -251,7 +305,7 @@ spec:
     volumeMounts:
     - mountPath: /etc/ssl/certs
       name: "ssl-certs"
-    - mountPath: /etc/kubernetes/worker-kubeconfig.yaml
+    - mountPath: /etc/kubernetes/kube-proxy.kubeconfig
       name: "kubeconfig"
       readOnly: true
     - mountPath: /etc/kubernetes/ssl
@@ -266,7 +320,7 @@ spec:
       path: "/usr/share/ca-certificates"
   - name: "kubeconfig"
     hostPath:
-      path: "/etc/kubernetes/worker-kubeconfig.yaml"
+      path: "/etc/kubernetes/kube-proxy.kubeconfig"
   - name: "etc-kube-ssl"
     hostPath:
       path: "/etc/kubernetes/ssl"

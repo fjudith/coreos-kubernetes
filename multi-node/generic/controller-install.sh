@@ -313,8 +313,9 @@ ExecStartPre=-/usr/bin/rkt rm --uuid-file=${uuid_file}
 ExecStartPre=/usr/bin/mkdir -p /var/lib/kubelet/volumeplugins
 ExecStartPre=/usr/bin/mkdir -p /var/lib/rook
 ExecStart=/usr/lib/coreos/kubelet-wrapper \
-  --kubeconfig=/etc/kubernetes/master-kubeconfig.yaml \
-  --register-schedulable=false \
+  --kubeconfig=/etc/kubernetes/kubelet.kubeconfig \
+  --node-labels=kubernetes.io/role=master \
+  --register-with-taints=node-role.kubernetes.io/master=:NoSchedule \
   --cni-conf-dir=/etc/cni/net.d \
   --cni-bin-dir=/opt/cni/bin \
   --network-plugin=cni \
@@ -338,7 +339,7 @@ WantedBy=multi-user.target
 EOF
     fi
 
-    local TEMPLATE=/etc/kubernetes/master-kubeconfig.yaml
+    local TEMPLATE=/etc/kubernetes/kubelet.kubeconfig
     if [ ! -f $TEMPLATE ]; then
         echo "TEMPLATE: $TEMPLATE"
         mkdir -p $(dirname $TEMPLATE)
@@ -357,6 +358,31 @@ contexts:
     user: kubelet
   name: kubelet-context
 current-context: kubelet-context
+EOF
+    fi
+
+    local TEMPLATE=/etc/kubernetes/bootstrap.kubeconfig
+    if [ ! -f $TEMPLATE ]; then
+        echo "TEMPLATE: $TEMPLATE"
+        mkdir -p $(dirname $TEMPLATE)
+        cat << EOF > $TEMPLATE
+apiVersion: v1
+kind: Config
+clusters:
+- name: local
+  cluster:
+    server: https://127.0.0.1:6443
+    certificate-authority: /etc/kubernetes/ssl/ca.pem
+users:
+- name: kubelet-bootstrap
+  user:
+    token: $(cat /etc/kubernetes/token.csv | awk -F ',' '{print $1}')
+contexts:
+- context:
+    cluster: local
+    user: kubelet-bootstrap
+  name: default
+current-context: default
 EOF
     fi
 
@@ -419,6 +445,32 @@ RequiredBy=kubelet.service
 EOF
     fi
 
+    local TEMPLATE=/etc/kubernetes/kube-proxy.kubeconfig
+    if [ ! -f $TEMPLATE ]; then
+        echo "TEMPLATE: $TEMPLATE"
+        mkdir -p $(dirname $TEMPLATE)
+        cat << EOF > $TEMPLATE
+apiVersion: v1
+kind: Config
+clusters:
+- name: local
+  cluster:
+    server: https://127.0.0.1:6443
+    certificate-authority: /etc/kubernetes/ssl/ca.pem
+users:
+- name: kube-proxy
+  user:
+    client-certificate: /etc/kubernetes/ssl/kube-proxy.pem
+    client-key: /etc/kubernetes/ssl/kube-proxy-key.pem
+contexts:
+- context:
+    cluster: local
+    user: kube-proxy
+  name: default
+current-context: default
+EOF
+    fi
+
     local TEMPLATE=/etc/kubernetes/manifests/kube-proxy.yaml
     if [ ! -f $TEMPLATE ]; then
         echo "TEMPLATE: $TEMPLATE"
@@ -442,23 +494,48 @@ spec:
     - --master=http://127.0.0.1:8080
     - --cluster-cidr=${POD_NETWORK}
     - --masquerade-all
+    - --kubeconfig=/etc/kubernetes/kube-proxy.kubeconfig
     - --v=2
     securityContext:
       privileged: true
     volumeMounts:
     - mountPath: /etc/ssl/certs
-      name: ssl-certs-host
+      name: "ssl-certs"
+    - mountPath: /etc/kubernetes/kube-proxy.kubeconfig
+      name: "kubeconfig"
+      readOnly: true
+    - mountPath: /etc/kubernetes/ssl
+      name: "etc-kube-ssl"
       readOnly: true
     - mountPath: /var/run/dbus
       name: dbus
       readOnly: false
   volumes:
-  - hostPath:
-      path: /usr/share/ca-certificates
-    name: ssl-certs-host
+  - name: "ssl-certs"
+    hostPath:
+      path: "/usr/share/ca-certificates"
+  - name: "kubeconfig"
+    hostPath:
+      path: "/etc/kubernetes/kube-proxy.kubeconfig"
+  - name: "etc-kube-ssl"
+    hostPath:
+      path: "/etc/kubernetes/ssl"
   - hostPath:
       path: /var/run/dbus
     name: dbus
+EOF
+    fi
+
+    local TEMPLATE=/etc/kubernetes/audit-policy.yaml
+    if [ ! -f $TEMPLATE ]; then
+        echo "TEMPLATE: $TEMPLATE"
+        mkdir -p $(dirname $TEMPLATE)
+        cat << EOF > $TEMPLATE
+# Log all requests at the Metadata level.
+apiVersion: audit.k8s.io/v1beta1
+kind: Policy
+rules:
+- level: Metadata
 EOF
     fi
 
@@ -480,21 +557,40 @@ spec:
     command:
     - /hyperkube
     - apiserver
-    - --bind-address=0.0.0.0
-    - --etcd-servers=${ETCD_ENDPOINTS}
-    - --allow-privileged=true
-    - --authorization-mode=RBAC
-    - --service-cluster-ip-range=${SERVICE_IP_RANGE}
-    - --secure-port=443
-    - --advertise-address=${ADVERTISE_IP}
-    - --admission-control=NamespaceLifecycle,LimitRanger,ServiceAccount,PersistentVolumeLabel,DefaultStorageClass,DefaultTolerationSeconds,MutatingAdmissionWebhook,ValidatingAdmissionWebhook,ResourceQuota
+    - --authorization-mode=RBAC,Node
+    # - --runtime-config=batch/v2alpha1=true
+    - --runtime-config=extensions/v1beta1/networkpolicies=true
+    - --kubelet-https=true
+    - --anonymous-auth=false
+    - --enable-bootstrap-token-auth
+    - --token-auth-file=/etc/kubernetes/token.csv
+    - --service-node-port-range=30000-50000
     - --tls-cert-file=/etc/kubernetes/ssl/apiserver.pem
     - --tls-private-key-file=/etc/kubernetes/ssl/apiserver-key.pem
     - --client-ca-file=/etc/kubernetes/ssl/ca.pem
     - --service-account-key-file=/etc/kubernetes/ssl/apiserver-key.pem
-    - --runtime-config=extensions/v1beta1/networkpolicies=true
-    - --anonymous-auth=false
+    # - --etcd-quorum-read=true
     - --storage-backend=etcd3
+    # - --etcd-cafile=/etc/etcd/ssl/etcd-root-ca.pem
+    # - --etcd-certfile=/etc/etcd/ssl/etcd.pem
+    # - --etcd-keyfile=/etc/etcd/ssl/etcd-key.pem
+    - --etcd-servers=${ETCD_ENDPOINTS}
+    - --enable-swagger-ui=true
+    - --apiserver-count=3
+    - --audit-policy-file=/etc/kubernetes/audit-policy.yaml
+    - --audit-log-maxage=30
+    - --audit-log-maxbackup=3
+    - --audit-log-maxsize=100
+    - --audit-log-path=/var/log/kube-audit/audit.log
+    - --event-ttl=1h
+    - --bind-address=0.0.0.0
+    - --insecure-bind-address=127.0.0.1
+    - --allow-privileged=true
+    - --service-cluster-ip-range=${SERVICE_IP_RANGE}
+    - --insecure-port=8080
+    - --secure-port=6443
+    - --advertise-address=${ADVERTISE_IP}
+    - --admission-control=NamespaceLifecycle,LimitRanger,ServiceAccount,PersistentVolumeLabel,DefaultStorageClass,DefaultTolerationSeconds,MutatingAdmissionWebhook,ValidatingAdmissionWebhook,ResourceQuota,NodeRestriction
     - --storage-media-type=application/json
     - --v=2
     livenessProbe:
@@ -505,8 +601,8 @@ spec:
       initialDelaySeconds: 15
       timeoutSeconds: 15
     ports:
-    - containerPort: 443
-      hostPort: 443
+    - containerPort: 6443
+      hostPort: 6443
       name: https
     - containerPort: 7080
       hostPort: 7080
@@ -520,7 +616,13 @@ spec:
     - mountPath: /etc/ssl/certs
       name: ssl-certs-host
       readOnly: true
+    - mountPath: /etc/kubernetes
+      name: config-kubernetes
+      readOnly: true
   volumes:
+  - hostPath:
+      path: /etc/kubernetes
+    name: config-kubernetes
   - hostPath:
       path: /etc/kubernetes/ssl
     name: ssl-certs-kubernetes
@@ -549,11 +651,15 @@ spec:
     - controller-manager
     - --master=http://127.0.0.1:8080
     - --leader-elect=true
+    - --feature-gates=RotateKubeletServerCertificate=true
     - --service-account-private-key-file=/etc/kubernetes/ssl/apiserver-key.pem
     - --root-ca-file=/etc/kubernetes/ssl/ca.pem
     - --flex-volume-plugin-dir=/etc/kubernetes/volumeplugins
     - --cluster-signing-cert-file=/etc/kubernetes/ssl/ca.pem
     - --cluster-signing-key-file=/etc/kubernetes/ssl/ca-key.pem
+    - --node-monitor-grace-period=40s
+    - --node-monitor-period=5s
+    - --pod-eviction-timeout=5m0s
     - --v=2
     resources:
       requests:
@@ -643,7 +749,7 @@ subjects:
 EOF
     fi
 
-    local TEMPLATE=/srv/kubernetes/manifests/coredns-sa.yaml
+    local TEMPLATE=/srv/kubernetes/manifests/coredns-serviceaccount.yaml
     if [ ! -f $TEMPLATE ]; then
         echo "TEMPLATE: $TEMPLATE"
         mkdir -p $(dirname $TEMPLATE)
@@ -703,7 +809,7 @@ subjects:
 EOF
     fi
 
-    local TEMPLATE=/srv/kubernetes/manifests/coredns-cm.yaml
+    local TEMPLATE=/srv/kubernetes/manifests/coredns-configmap.yaml
     if [ ! -f $TEMPLATE ]; then
         echo "TEMPLATE: $TEMPLATE"
         mkdir -p $(dirname $TEMPLATE)
@@ -733,7 +839,7 @@ data:
 EOF
     fi
 
-    local TEMPLATE=/srv/kubernetes/manifests/coredns-de.yaml
+    local TEMPLATE=/srv/kubernetes/manifests/coredns-deployment.yaml
     if [ ! -f $TEMPLATE ]; then
         echo "TEMPLATE: $TEMPLATE"
         mkdir -p $(dirname $TEMPLATE)
@@ -812,7 +918,7 @@ spec:
 EOF
     fi
 
-    local TEMPLATE=/srv/kubernetes/manifests/coredns-svc.yaml
+    local TEMPLATE=/srv/kubernetes/manifests/coredns-service.yaml
     if [ ! -f $TEMPLATE ]; then
         echo "TEMPLATE: $TEMPLATE"
         mkdir -p $(dirname $TEMPLATE)
@@ -841,7 +947,7 @@ spec:
 EOF
     fi
 
-    local TEMPLATE=/srv/kubernetes/manifests/kube-dns-autoscaler-de.yaml
+    local TEMPLATE=/srv/kubernetes/manifests/kube-dns-autoscaler-deployment.yaml
     if [ ! -f $TEMPLATE ]; then
         echo "TEMPLATE: $TEMPLATE"
         mkdir -p $(dirname $TEMPLATE)
@@ -892,7 +998,7 @@ spec:
 EOF
     fi
 
-    local TEMPLATE=/srv/kubernetes/manifests/kube-dns-autoscaler-sa.yaml
+    local TEMPLATE=/srv/kubernetes/manifests/kube-dns-autoscaler-serviceaccount.yaml
     if [ ! -f $TEMPLATE ]; then
         echo "TEMPLATE: $TEMPLATE"
         mkdir -p $(dirname $TEMPLATE)
@@ -951,7 +1057,7 @@ roleRef:
 EOF
     fi
 
-    local TEMPLATE=/srv/kubernetes/manifests/heapster-de.yaml
+    local TEMPLATE=/srv/kubernetes/manifests/heapster-deployment.yaml
     if [ ! -f $TEMPLATE ]; then
         echo "TEMPLATE: $TEMPLATE"
         mkdir -p $(dirname $TEMPLATE)
@@ -1038,7 +1144,7 @@ spec:
 EOF
     fi
 
-    local TEMPLATE=/srv/kubernetes/manifests/heapster-svc.yaml
+    local TEMPLATE=/srv/kubernetes/manifests/heapster-service.yaml
     if [ ! -f $TEMPLATE ]; then
         echo "TEMPLATE: $TEMPLATE"
         mkdir -p $(dirname $TEMPLATE)
@@ -1061,7 +1167,7 @@ spec:
 EOF
     fi
 
-    local TEMPLATE=/srv/kubernetes/manifests/heapster-sa.yaml
+    local TEMPLATE=/srv/kubernetes/manifests/heapster-serviceaccount.yaml
     if [ ! -f $TEMPLATE ]; then
         echo "TEMPLATE: $TEMPLATE"
         mkdir -p $(dirname $TEMPLATE)
@@ -1077,7 +1183,7 @@ metadata:
 EOF
     fi
 
-    local TEMPLATE=/srv/kubernetes/manifests/heapster-cm.yaml
+    local TEMPLATE=/srv/kubernetes/manifests/heapster-configmap.yaml
     if [ ! -f $TEMPLATE ]; then
         echo "TEMPLATE: $TEMPLATE"
         mkdir -p $(dirname $TEMPLATE)
@@ -1097,7 +1203,7 @@ data:
 EOF
     fi
 
-    local TEMPLATE=/srv/kubernetes/manifests/kube-dashboard-de.yaml
+    local TEMPLATE=/srv/kubernetes/manifests/kube-dashboard-deployment.yaml
     if [ ! -f $TEMPLATE ]; then
         echo "TEMPLATE: $TEMPLATE"
         mkdir -p $(dirname $TEMPLATE)
@@ -1138,7 +1244,9 @@ spec:
           protocol: TCP
         args:
           # PLATFORM-SPECIFIC ARGS HERE
-          - --auto-generate-certificates
+          # - --auto-generate-certificates
+          - --tls-key-file=dashboard.key
+          - --tls-cert-file=dashboard.crt
         volumeMounts:
         - name: kubernetes-dashboard-certs
           mountPath: /certs
@@ -1164,7 +1272,7 @@ spec:
 EOF
     fi
 
-    local TEMPLATE=/srv/kubernetes/manifests/kube-dashboard-svc.yaml
+    local TEMPLATE=/srv/kubernetes/manifests/kube-dashboard-service.yaml
     if [ ! -f $TEMPLATE ]; then
         echo "TEMPLATE: $TEMPLATE"
         mkdir -p $(dirname $TEMPLATE)
@@ -1187,21 +1295,21 @@ spec:
 EOF
     fi
 
-    local TEMPLATE=/srv/kubernetes/manifests/kube-dashboard-sec.yaml
+    local TEMPLATE=/srv/kubernetes/manifests/kube-dashboard-secret.yaml
     if [ ! -f $TEMPLATE ]; then
         echo "TEMPLATE: $TEMPLATE"
         mkdir -p $(dirname $TEMPLATE)
         cat << EOF > $TEMPLATE
-apiVersion: v1
-kind: Secret
-metadata:
-  labels:
-    k8s-app: kubernetes-dashboard
-    # Allows editing resource and makes sure it is created first.
-    addonmanager.kubernetes.io/mode: EnsureExists
-  name: kubernetes-dashboard-certs
-  namespace: kube-system
-type: Opaque
+# apiVersion: v1
+# kind: Secret
+# metadata:
+#   labels:
+#     k8s-app: kubernetes-dashboard
+#     # Allows editing resource and makes sure it is created first.
+#     addonmanager.kubernetes.io/mode: EnsureExists
+#   name: kubernetes-dashboard-certs
+#   namespace: kube-system
+# type: Opaque
 ---
 apiVersion: v1
 kind: Secret
@@ -1216,7 +1324,7 @@ type: Opaque
 EOF
     fi
 
-local TEMPLATE=/srv/kubernetes/manifests/kube-dashboard-sa.yaml
+local TEMPLATE=/srv/kubernetes/manifests/kube-dashboard-serviceaccount.yaml
     if [ ! -f $TEMPLATE ]; then
         echo "TEMPLATE: $TEMPLATE"
         mkdir -p $(dirname $TEMPLATE)
@@ -1285,7 +1393,7 @@ subjects:
 EOF
     fi
 
-local TEMPLATE=/srv/kubernetes/manifests/kube-dashboard-cm.yaml
+local TEMPLATE=/srv/kubernetes/manifests/kube-dashboard-configmap.yaml
     if [ ! -f $TEMPLATE ]; then
         echo "TEMPLATE: $TEMPLATE"
         mkdir -p $(dirname $TEMPLATE)
@@ -1750,6 +1858,166 @@ metadata:
   namespace: kube-system
 EOF
     fi
+
+local TEMPLATE=/srv/kubernetes/manifests/traefik-rbac.yaml
+    if [ ! -f $TEMPLATE ]; then
+        echo "TEMPLATE: $TEMPLATE"
+        mkdir -p $(dirname $TEMPLATE)
+        cat << EOF > $TEMPLATE
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1beta1
+metadata:
+  name: traefik-ingress-controller
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - services
+      - endpoints
+      - secrets
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - extensions
+    resources:
+      - ingresses
+    verbs:
+      - get
+      - list
+      - watch
+---
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1beta1
+metadata:
+  name: traefik-ingress-controller
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: traefik-ingress-controller
+subjects:
+- kind: ServiceAccount
+  name: traefik-ingress-controller
+  namespace: kube-system
+EOF
+    fi
+
+local TEMPLATE=/srv/kubernetes/manifests/traefik-serviceaccount.yaml
+    if [ ! -f $TEMPLATE ]; then
+        echo "TEMPLATE: $TEMPLATE"
+        mkdir -p $(dirname $TEMPLATE)
+        cat << EOF > $TEMPLATE
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: traefik-ingress-controller
+  namespace: kube-system
+EOF
+    fi
+
+local TEMPLATE=/srv/kubernetes/manifests/traefik-deployment.yaml
+    if [ ! -f $TEMPLATE ]; then
+        echo "TEMPLATE: $TEMPLATE"
+        mkdir -p $(dirname $TEMPLATE)
+        cat << EOF > $TEMPLATE
+kind: Deployment
+apiVersion: extensions/v1beta1
+metadata:
+  name: traefik-ingress-controller
+  namespace: kube-system
+  labels:
+    k8s-app: traefik-ingress-lb
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      k8s-app: traefik-ingress-lb
+  template:
+    metadata:
+      labels:
+        k8s-app: traefik-ingress-lb
+        name: traefik-ingress-lb
+    spec:
+      serviceAccountName: traefik-ingress-controller
+      terminationGracePeriodSeconds: 60
+      containers:
+      - image: traefik
+        name: traefik-ingress-lb
+        args:
+        - --web
+        - --kubernetes
+EOF
+    fi
+local TEMPLATE=/srv/kubernetes/manifests/traefik-service.yaml
+    if [ ! -f $TEMPLATE ]; then
+        echo "TEMPLATE: $TEMPLATE"
+        mkdir -p $(dirname $TEMPLATE)
+        cat << EOF > $TEMPLATE
+kind: Service
+apiVersion: v1
+metadata:
+  name: traefik-ingress-service
+  namespace: kube-system
+spec:
+  selector:
+    k8s-app: traefik-ingress-lb
+  ports:
+  - nodePort: 30080
+    port: 80
+    protocol: TCP
+    targetPort: 80
+    name: web
+  - nodePort: 38080
+    port: 8080
+    protocol: TCP
+    targetPort: 8080
+    name: admin
+  type: NodePort
+EOF
+    fi
+
+local TEMPLATE=/srv/kubernetes/manifests/traefik-web-ui-service.yaml
+    if [ ! -f $TEMPLATE ]; then
+        echo "TEMPLATE: $TEMPLATE"
+        mkdir -p $(dirname $TEMPLATE)
+        cat << EOF > $TEMPLATE
+apiVersion: v1
+kind: Service
+metadata:
+  name: traefik-web-ui
+  namespace: kube-system
+spec:
+  selector:
+    k8s-app: traefik-ingress-lb
+  ports:
+  - name: web
+    port: 80
+    targetPort: 8080
+EOF
+    fi
+
+local TEMPLATE=/srv/kubernetes/manifests/traefik-web-ui-ingress.yaml
+    if [ ! -f $TEMPLATE ]; then
+        echo "TEMPLATE: $TEMPLATE"
+        mkdir -p $(dirname $TEMPLATE)
+        cat << EOF > $TEMPLATE
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: traefik-web-ui
+  namespace: kube-system
+spec:
+  rules:
+  - host: traefik-ui.bs.com
+    http:
+      paths:
+      - path: /
+        backend:
+          serviceName: traefik-web-ui
+          servicePort: web
+EOF
+    fi
 }
 
 function start_addons {
@@ -1763,26 +2031,39 @@ function start_addons {
     echo "K8S: addon cluster admin"
     docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/add-on-cluster-admin-crb.yaml
     echo "K8S: DNS addon"
-    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/coredns-svc.yaml
-    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/coredns-sa.yaml
-    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/coredns-cm.yaml
+    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/coredns-service.yaml
+    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/coredns-serviceaccount.yaml
+    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/coredns-configmap.yaml
     docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/coredns-rbac.yaml
-    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/coredns-de.yaml
-    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/kube-dns-autoscaler-sa.yaml
+    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/coredns-deployment.yaml
+    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/kube-dns-autoscaler-serviceaccount.yaml
     docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/kube-dns-autoscaler-rbac.yaml
-    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/kube-dns-autoscaler-de.yaml
+    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/kube-dns-autoscaler-deployment.yaml
     echo "K8S: Heapster addon"
-    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/heapster-svc.yaml
-    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/heapster-sa.yaml
-    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/heapster-cm.yaml
-    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/heapster-de.yaml
+    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/heapster-service.yaml
+    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/heapster-serviceaccount.yaml
+    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/heapster-configmap.yaml
+    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/heapster-deployment.yaml
     echo "K8S: Dashboard addon"
-    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/kube-dashboard-sa.yaml
+    if ! [ `docker run --rm --net=host $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl -n kube-system describe secret kubernetes-dashboard-certs` ]; then 
+      docker run --rm --net=host \
+      -v /etc/kubernetes/ssl/dashboard.crt:/certs/dashboard.crt \
+      -v /etc/kubernetes/ssl/dashboard.key:/certs/dashboard.key \
+      $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl create secret generic kubernetes-dashboard-certs --from-file=/certs -n kube-system
+    fi
+    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/kube-dashboard-serviceaccount.yaml
     docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/kube-dashboard-rbac.yaml
-    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/kube-dashboard-sec.yaml
-    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/kube-dashboard-cm.yaml
-    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/kube-dashboard-svc.yaml
-    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/kube-dashboard-de.yaml  
+    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/kube-dashboard-secret.yaml
+    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/kube-dashboard-configmap.yaml
+    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/kube-dashboard-service.yaml
+    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/kube-dashboard-deployment.yaml
+    echo "K8S: Traefik addon"
+    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/traefik-serviceaccount.yaml
+    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/traefik-rbac.yaml
+    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/traefik-service.yaml
+    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/traefik-deployment.yaml
+    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/traefik-web-ui-service.yaml
+    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/traefik-web-ui-ingress.yaml
 }
 
 function start_calico {
