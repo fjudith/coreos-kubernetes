@@ -212,6 +212,11 @@ Vagrant.configure("2") do |config|
       controller.vm.provision :file, :source => dashboardCert, :destination => "/tmp/dashboard.crt"
       controller.vm.provision :shell, :inline => "mv /tmp/dashboard.* /etc/kubernetes/ssl/", :privileged => true
 
+      # Copy Token for Kubernetes ApiServer
+      tokenFile = "token/token.csv"
+      controller.vm.provision :file, :source => tokenFile, :destination => "/tmp/token.csv"
+      controller.vm.provision :shell, :inline => "mv /tmp/token.csv /etc/kubernetes/", :privileged => true
+
       controller.vm.provision :file, :source => env_file, :destination => "/tmp/coreos-kube-options.env"
       controller.vm.provision :shell, :inline => "mkdir -p /run/coreos-kubernetes && mv /tmp/coreos-kube-options.env /run/coreos-kubernetes/options.env", :privileged => true
 
@@ -260,6 +265,11 @@ Vagrant.configure("2") do |config|
       provisionMachineSSL(worker,"node","node-#{workerIP}",[workerIP])
       provisionMachineSSL(worker,"kube-proxy","kube-proxy-#{workerIP}",[workerIP])
       provisionMachineSSL(worker,"flanneld","flanneld-#{workerIP}",[workerIP])
+
+      # Copy Token for Kubernetes Kube-Proxy
+      tokenFile = "token/token.csv"
+      worker.vm.provision :file, :source => tokenFile, :destination => "/tmp/token.csv"
+      worker.vm.provision :shell, :inline => "mv /tmp/token.csv /etc/kubernetes/", :privileged => true
 
       worker.vm.provision :file, :source => env_file, :destination => "/tmp/coreos-kube-options.env"
       worker.vm.provision :shell, :inline => "mkdir -p /run/coreos-kubernetes && mv /tmp/coreos-kube-options.env /run/coreos-kubernetes/options.env", :privileged => true

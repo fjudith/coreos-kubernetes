@@ -4,9 +4,17 @@ set -e
 # define location of openssl binary manually since running this
 # script under Vagrant fails on some systems without it
 if ! which cfssl cfssl-certinfo cfssljson > /dev/null ; then
-    curl -o /usr/bin/cfssl.exe https://pkg.cfssl.org/R1.2/cfssl_windows-amd64.exe && \
-    curl -o /usr/bin/cfssl-certinfo.exe https://pkg.cfssl.org/R1.2/cfssl-certinfo_windows-amd64.exe && \
-    curl -o /usr/bin/cfssljson.exe https://pkg.cfssl.org/R1.2/cfssljson_windows-amd64.exe
+    case $(uname -s) in
+      "Linux")
+        ;;
+      "Darwin")
+        ;;
+      "MINGW*")
+        curl -o /usr/bin/cfssl.exe https://pkg.cfssl.org/R1.2/cfssl_windows-amd64.exe && \
+        curl -o /usr/bin/cfssl-certinfo.exe https://pkg.cfssl.org/R1.2/cfssl-certinfo_windows-amd64.exe && \
+        curl -o /usr/bin/cfssljson.exe https://pkg.cfssl.org/R1.2/cfssljson_windows-amd64.exe
+        ;;
+    esac
 fi
 
 function usage {
@@ -227,7 +235,7 @@ local TEMPLATE=$OUTDIR/${CERTBASE}-csr.json
         mkdir -p $(dirname $TEMPLATE)
         cat << EOF > $TEMPLATE
 {
-  "CN": "system:node:${CERTBASE}",
+  "CN": "system:node:${CN}",
   "key": {
     "algo": "rsa",
     "size": 2048
@@ -264,14 +272,13 @@ local TEMPLATE=$OUTDIR/${CERTBASE}-csr.json
         cat << EOF > $TEMPLATE
 {
   "CN": "system:kube-proxy",
-  "hosts": [],
   "key": {
     "algo": "rsa",
     "size": 2048
   },
   "names": [
     {
-      "O": "k8s",
+      "O": "system:node-proxier",
       "OU": "CoreOS Kubernetes"
     }
   ]

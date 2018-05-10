@@ -123,8 +123,8 @@ ExecStart=/usr/lib/coreos/kubelet-wrapper \
   --kubeconfig=/etc/kubernetes/kubelet.kubeconfig \
   --require-kubeconfig \
   --bootstrap-kubeconfig=/etc/kubernetes/bootstrap.kubeconfig \
-  --tls-cert-file=/etc/kubernetes/ssl/worker.pem \
-  --tls-private-key-file=/etc/kubernetes/ssl/worker-key.pem \
+  --tls-cert-file=/etc/kubernetes/ssl/node.pem \
+  --tls-private-key-file=/etc/kubernetes/ssl/node-key.pem \
   --volume-plugin-dir=/etc/kubernetes/volumeplugins \
   --authentication-token-webhook=true \
   --authorization-mode=Webhook \
@@ -211,8 +211,8 @@ clusters:
 users:
 - name: kubelet
   user:
-    client-certificate: /etc/kubernetes/ssl/worker.pem
-    client-key: /etc/kubernetes/ssl/worker-key.pem
+    client-certificate: /etc/kubernetes/ssl/node.pem
+    client-key: /etc/kubernetes/ssl/node-key.pem
 contexts:
 - context:
     cluster: local
