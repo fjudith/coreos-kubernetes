@@ -3,7 +3,7 @@ set -e
 
 # define location of openssl binary manually since running this
 # script under Vagrant fails on some systems without it
-if ! which cfssl cfssl-certinfo cfssljson ; then
+if ! which cfssl cfssl-certinfo cfssljson > /dev/null ; then
     curl -o /usr/bin/cfssl.exe https://pkg.cfssl.org/R1.2/cfssl_windows-amd64.exe && \
     curl -o /usr/bin/cfssl-certinfo.exe https://pkg.cfssl.org/R1.2/cfssl-certinfo_windows-amd64.exe && \
     curl -o /usr/bin/cfssljson.exe https://pkg.cfssl.org/R1.2/cfssljson_windows-amd64.exe
@@ -39,7 +39,7 @@ fi
 # Root CA certificate
 # ---------------------------------------------
 function write-ssl-ca {
-local TEMPLATE=$OUTDIR/ca.json
+local TEMPLATE=$OUTDIR/ca-config.json
     if [ ! -f $TEMPLATE ]; then
         echo "local TEMPLATE: $TEMPLATE"
         mkdir -p $(dirname $TEMPLATE)
@@ -79,7 +79,7 @@ local TEMPLATE=$OUTDIR/ca-csr.json
   "names": [
     {
       "O": "k8s",
-      "OU": "System"
+      "OU": "CoreOS Kubernetes"
     }
   ]
 }
@@ -105,7 +105,7 @@ local TEMPLATE=$OUTDIR/${CERTBASE}-csr.json
         mkdir -p $(dirname $TEMPLATE)
         cat << EOF > $TEMPLATE
 {
-  "CN": "etcd",
+  "CN": "${CN}",
   "hosts": [
     ${ETCD_IP}
     "127.0.0.1"
@@ -117,7 +117,7 @@ local TEMPLATE=$OUTDIR/${CERTBASE}-csr.json
   "names": [
     {
       "O": "k8s",
-      "OU": "System"
+      "OU": "CoreOS Kubernetes"
     }
   ]
 }
@@ -131,7 +131,7 @@ CERTIFICATE=$OUTDIR/${CERTBASE}.pem
         cfssl gencert -ca=$OUTDIR/ca.pem \
         -ca-key=$OUTDIR/ca-key.pem \
         -config=$OUTDIR/ca-config.json \
-        -profile=kubernetes $OUTDIR/${CERTBASE}-csr.json | cfssljson -bare etcd
+        -profile=kubernetes $OUTDIR/${CERTBASE}-csr.json | cfssljson -bare $OUTDIR/etcd
     fi
 }
 
@@ -153,7 +153,7 @@ local TEMPLATE=$OUTDIR/${CERTBASE}-csr.json
   "names": [
     {
       "O": "system:masters",
-      "OU": "System"
+      "OU": "CoreOS Kubernetes"
     }
   ]
 }
@@ -167,7 +167,7 @@ CERTIFICATE=$OUTDIR/${CERTBASE}.pem
         cfssl gencert -ca=$OUTDIR/ca.pem \
         -ca-key=$OUTDIR/ca-key.pem \
         -config=$OUTDIR/ca-config.json \
-        -profile=kubernetes $OUTDIR/${CERTBASE}-csr.json | cfssljson -bare admin
+        -profile=kubernetes $OUTDIR/${CERTBASE}-csr.json | cfssljson -bare $OUTDIR/admin
     fi
 }
 
@@ -186,6 +186,7 @@ local TEMPLATE=$OUTDIR/${CERTBASE}-csr.json
   "hosts": [
     "127.0.0.1",
     ${MASTER_IP}
+    "localhost",
     "kubernetes",
     "kubernetes.default",
     "kubernetes.default.svc",
@@ -198,8 +199,8 @@ local TEMPLATE=$OUTDIR/${CERTBASE}-csr.json
   },
   "names": [
     {
-      "O": "k8s",
-      "OU": "System"
+      "O": "system:masters",
+      "OU": "CoreOS Kubernetes"
     }
   ]
 }
@@ -213,39 +214,28 @@ CERTIFICATE=$OUTDIR/${CERTBASE}.pem
         cfssl gencert -ca=$OUTDIR/ca.pem \
         -ca-key=$OUTDIR/ca-key.pem \
         -config=$OUTDIR/ca-config.json \
-        -profile=kubernetes $OUTDIR/${CERTBASE}-csr.json | cfssljson -bare master
+        -profile=kubernetes $OUTDIR/${CERTBASE}-csr.json | cfssljson -bare $OUTDIR/${CERTBASE}
     fi
 }
 
 # Node certificate
 # ---------------------------------------------
 function write-ssl-node {
-NODE_IP=$(for i in $(printf ${SANS} | tr ',' '\n'); do printf "\"$i\","; done)
-
 local TEMPLATE=$OUTDIR/${CERTBASE}-csr.json
     if [ ! -f $TEMPLATE ]; then
         echo "local TEMPLATE: $TEMPLATE"
         mkdir -p $(dirname $TEMPLATE)
         cat << EOF > $TEMPLATE
 {
-  "CN": "kubernetes",
-  "hosts": [
-    "127.0.0.1",
-    ${NODE_IP}
-    "kubernetes",
-    "kubernetes.default",
-    "kubernetes.default.svc",
-    "kubernetes.default.svc.cluster",
-    "kubernetes.default.svc.cluster.local"
-  ],
+  "CN": "system:node:${CERTBASE}",
   "key": {
     "algo": "rsa",
     "size": 2048
   },
   "names": [
     {
-      "O": "k8s",
-      "OU": "System"
+      "O": "system:nodes",
+      "OU": "CoreOS Kubernetes"
     }
   ]
 }
@@ -259,7 +249,8 @@ CERTIFICATE=$OUTDIR/${CERTBASE}.pem
         cfssl gencert -ca=$OUTDIR/ca.pem \
         -ca-key=$OUTDIR/ca-key.pem \
         -config=$OUTDIR/ca-config.json \
-        -profile=kubernetes $OUTDIR/${CERTBASE}-csr.json | cfssljson -bare node
+        -hostname=${SANS} \
+        -profile=kubernetes $OUTDIR/${CERTBASE}-csr.json | cfssljson -bare $OUTDIR/${CERTBASE}
     fi
 }
 
@@ -281,7 +272,7 @@ local TEMPLATE=$OUTDIR/${CERTBASE}-csr.json
   "names": [
     {
       "O": "k8s",
-      "OU": "System"
+      "OU": "CoreOS Kubernetes"
     }
   ]
 }
@@ -295,7 +286,7 @@ CERTIFICATE=$OUTDIR/${CERTBASE}.pem
         cfssl gencert -ca=$OUTDIR/ca.pem \
         -ca-key=$OUTDIR/ca-key.pem \
         -config=$OUTDIR/ca-config.json \
-        -profile=kubernetes $OUTDIR/${CERTBASE}-csr.json | cfssljson -bare kube-proxy
+        -profile=kubernetes $OUTDIR/${CERTBASE}-csr.json | cfssljson -bare $OUTDIR/${CERTBASE}
     fi
 }
 
@@ -314,6 +305,7 @@ local TEMPLATE=$OUTDIR/${CERTBASE}-csr.json
   "hosts": [
     "127.0.0.1",
     ${APISERVER_IP}
+    "localhost",
     "kubernetes",
     "kubernetes.default",
     "kubernetes.default.svc",
@@ -327,7 +319,7 @@ local TEMPLATE=$OUTDIR/${CERTBASE}-csr.json
   "names": [
     {
       "O": "k8s",
-      "OU": "System"
+      "OU": "CoreOS Kubernetes"
     }
   ]
 }
@@ -341,7 +333,7 @@ CERTIFICATE=$OUTDIR/${CERTBASE}.pem
         cfssl gencert -ca=$OUTDIR/ca.pem \
         -ca-key=$OUTDIR/ca-key.pem \
         -config=$OUTDIR/ca-config.json \
-        -profile=kubernetes $OUTDIR/${CERTBASE}-csr.json | cfssljson -bare apiserver
+        -profile=kubernetes $OUTDIR/${CERTBASE}-csr.json | cfssljson -bare $OUTDIR/${CERTBASE}
     fi
 }
 
@@ -363,7 +355,7 @@ local TEMPLATE=$OUTDIR/${CERTBASE}-csr.json
   "names": [
     {
       "O": "k8s",
-      "OU": "System"
+      "OU": "CoreOS Kubernetes"
     }
   ]
 }
@@ -377,7 +369,7 @@ CERTIFICATE=$OUTDIR/${CERTBASE}.pem
         cfssl gencert -ca=$OUTDIR/ca.pem \
         -ca-key=$OUTDIR/ca-key.pem \
         -config=$OUTDIR/ca-config.json \
-        -profile=kubernetes $OUTDIR/${CERTBASE}-csr.json | cfssljson -bare dashboard
+        -profile=kubernetes $OUTDIR/${CERTBASE}-csr.json | cfssljson -bare $OUTDIR/dashboard
     fi
 }
 
@@ -399,7 +391,7 @@ local TEMPLATE=$OUTDIR/${CERTBASE}-csr.json
   "names": [
     {
       "O": "k8s",
-      "OU": "System"
+      "OU": "CoreOS Kubernetes"
     }
   ]
 }
@@ -413,7 +405,7 @@ CERTIFICATE=$OUTDIR/${CERTBASE}.pem
         cfssl gencert -ca=$OUTDIR/ca.pem \
         -ca-key=$OUTDIR/ca-key.pem \
         -config=$OUTDIR/ca-config.json \
-        -profile=kubernetes $OUTDIR/${CERTBASE}-csr.json | cfssljson -bare flanneld
+        -profile=kubernetes $OUTDIR/${CERTBASE}-csr.json | cfssljson -bare $OUTDIR/${CERTBASE}
     fi
 }
 
@@ -448,3 +440,16 @@ case "$2" in
       write-ssl-flanneld
       ;;
 esac
+
+CAFILE="$OUTDIR/ca.pem"
+CAKEYFILE="$OUTDIR/ca-key.pem"
+KEYFILE="$OUTDIR/$CERTBASE-key.pem"
+CSRFILE="$OUTDIR/$CERTBASE.csr"
+PEMFILE="$OUTDIR/$CERTBASE.pem"
+
+CONTENTS="${CAFILE} ${KEYFILE} ${PEMFILE}"
+
+tar -cf $OUTFILE -C $OUTDIR $(for  f in $CONTENTS;do printf "$(basename $f) ";done)
+
+echo "Bundled SSL artifacts into $OUTFILE"
+echo "$CONTENTS"
