@@ -164,7 +164,7 @@ $ kubectl get pods --namespace=kube-system | grep kube-dns-v20
 
 ## Deploy the kube Dashboard Add-on
 
-Create `kube-dashboard-rc.yaml` and `kube-dashboard-svc.yaml` on your local machine.
+Create `kube-dashboard-rc.yaml` and `kube-dashboard-service.yaml` on your local machine.
 
 **kube-dashboard-rc.yaml**
 
@@ -213,7 +213,7 @@ spec:
           timeoutSeconds: 30
 ```
 
-**kube-dashboard-svc.yaml**
+**kube-dashboard-service.yaml**
 
 
 ```yaml
@@ -237,7 +237,7 @@ Create the Replication Controller and Service.
 
 ```sh
 $ kubectl create -f kube-dashboard-rc.yaml
-$ kubectl create -f kube-dashboard-svc.yaml
+$ kubectl create -f kube-dashboard-service.yaml
 ```
 
 Access the dashboard by port forwarding with `kubectl`.
