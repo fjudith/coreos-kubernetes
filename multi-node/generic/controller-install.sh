@@ -313,9 +313,7 @@ ExecStartPre=-/usr/bin/rkt rm --uuid-file=${uuid_file}
 ExecStartPre=/usr/bin/mkdir -p /var/lib/kubelet/volumeplugins
 ExecStartPre=/usr/bin/mkdir -p /var/lib/rook
 ExecStart=/usr/lib/coreos/kubelet-wrapper \
-  --kubeconfig=/etc/kubernetes/kubelet.kubeconfig \
-  --node-labels=kubernetes.io/role=master \
-  --register-with-taints=node-role.kubernetes.io/master=:NoSchedule \
+  --anonymous-auth=false \
   --cni-conf-dir=/etc/cni/net.d \
   --cni-bin-dir=/opt/cni/bin \
   --network-plugin=cni \
@@ -323,10 +321,17 @@ ExecStart=/usr/lib/coreos/kubelet-wrapper \
   --rkt-path=/usr/bin/rkt \
   --allow-privileged=true \
   --pod-manifest-path=/etc/kubernetes/manifests \
+  --kubeconfig=/etc/kubernetes/kubelet.kubeconfig \
+  --node-labels=kubernetes.io/role=master \
+  --register-with-taints=node-role.kubernetes.io/master=:NoSchedule \
+  --client-ca-file=/etc/kubernetes/ssl/ca.pem \
   --hostname-override=${ADVERTISE_IP} \
   --cluster_dns=${DNS_SERVICE_IP} \
   --cluster_domain=cluster.local \
   --volume-plugin-dir=/etc/kubernetes/volumeplugins \
+  --client-ca-file=/etc/kubernetes/ssl/ca.pem \
+  --tls-cert-file=/etc/kubernetes/ssl/master.pem \
+  --tls-private-key-file=/etc/kubernetes/ssl/master-key.pem \
   --authentication-token-webhook=true \
   --authorization-mode=Webhook \
   --v=2
@@ -383,6 +388,25 @@ contexts:
     user: kubelet-bootstrap
   name: default
 current-context: default
+EOF
+    fi
+
+    local TEMPLATE=/etc/kubernetes/encryption-config.yaml
+    if [ ! -f $TEMPLATE ]; then
+        echo "TEMPLATE: $TEMPLATE"
+        mkdir -p $(dirname $TEMPLATE)
+        cat << EOF > $TEMPLATE
+kind: EncryptionConfig
+apiVersion: v1
+resources:
+  - resources:
+      - secrets
+    providers:
+      - aescbc:
+          keys:
+            - name: key1
+              secret: $(cat /etc/kubernetes/encryption-key.txt)
+      - identity: {}
 EOF
     fi
 
@@ -557,41 +581,45 @@ spec:
     command:
     - /hyperkube
     - apiserver
-    - --authorization-mode=RBAC,Node
-    # - --runtime-config=batch/v2alpha1=true
-    - --runtime-config=extensions/v1beta1/networkpolicies=true
-    - --kubelet-https=true
+    - --admission-control=NamespaceLifecycle,LimitRanger,ServiceAccount,PersistentVolumeLabel,DefaultStorageClass,DefaultTolerationSeconds,MutatingAdmissionWebhook,ValidatingAdmissionWebhook,ResourceQuota,NodeRestriction
+    - --advertise-address=${ADVERTISE_IP}
+    - --allow-privileged=true
     - --anonymous-auth=false
-    - --enable-bootstrap-token-auth
-    - --token-auth-file=/etc/kubernetes/token.csv
-    - --service-node-port-range=30000-50000
-    - --tls-cert-file=/etc/kubernetes/ssl/apiserver.pem
-    - --tls-private-key-file=/etc/kubernetes/ssl/apiserver-key.pem
-    - --client-ca-file=/etc/kubernetes/ssl/ca.pem
-    - --service-account-key-file=/etc/kubernetes/ssl/apiserver-key.pem
-    # - --etcd-quorum-read=true
-    - --storage-backend=etcd3
-    # - --etcd-cafile=/etc/etcd/ssl/etcd-root-ca.pem
-    # - --etcd-certfile=/etc/etcd/ssl/etcd.pem
-    # - --etcd-keyfile=/etc/etcd/ssl/etcd-key.pem
-    - --etcd-servers=${ETCD_ENDPOINTS}
-    - --enable-swagger-ui=true
     - --apiserver-count=3
-    - --audit-policy-file=/etc/kubernetes/audit-policy.yaml
     - --audit-log-maxage=30
     - --audit-log-maxbackup=3
     - --audit-log-maxsize=100
     - --audit-log-path=/var/log/kube-audit/audit.log
-    - --event-ttl=1h
+    - --audit-policy-file=/etc/kubernetes/audit-policy.yaml
+    - --authorization-mode=RBAC,Node
     - --bind-address=0.0.0.0
+    - --client-ca-file=/etc/kubernetes/ssl/ca.pem
+    - --enable-bootstrap-token-auth
+    - --enable-swagger-ui=true
+    - --storage-backend=etcd3
+    # - --etcd-cafile=/etc/etcd/ssl/etcd-root-ca.pem
+    # - --etcd-certfile=/etc/etcd/ssl/etcd.pem
+    # - --etcd-keyfile=/etc/etcd/ssl/etcd-key.pem
+    # - --runtime-config=batch/v2alpha1=true
+    - --etcd-servers=${ETCD_ENDPOINTS}
+    - --event-ttl=1h
+    # - --experimental-encryption-provider-config=/etc/kubernetes/encryption-config.yaml \\
     - --insecure-bind-address=127.0.0.1
-    - --allow-privileged=true
+    # https://kubernetes.io/docs/admin/kubelet-authentication-authorization/#kubelet-authentication
+    - --kubelet-certificate-authority=/etc/kubernetes/ssl/ca.pem
+    - --kubelet-client-certificate=/etc/kubernetes/ssl/apiserver.pem
+    - --kubelet-client-key=/etc/kubernetes/ssl/apiserver-key.pem
+    - --kubelet-https=true
+    - --runtime-config=api/all
+    # - --runtime-config=extensions/v1beta1/networkpolicies=true
+    - --service-account-key-file=/etc/kubernetes/ssl/ca-key.pem
     - --service-cluster-ip-range=${SERVICE_IP_RANGE}
-    - --insecure-port=8080
-    - --secure-port=6443
-    - --advertise-address=${ADVERTISE_IP}
-    - --admission-control=NamespaceLifecycle,LimitRanger,ServiceAccount,PersistentVolumeLabel,DefaultStorageClass,DefaultTolerationSeconds,MutatingAdmissionWebhook,ValidatingAdmissionWebhook,ResourceQuota,NodeRestriction
+    - --service-node-port-range=30000-50000
     - --storage-media-type=application/json
+    - --tls-cert-file=/etc/kubernetes/ssl/apiserver.pem
+    - --tls-private-key-file=/etc/kubernetes/ssl/apiserver-key.pem
+    - --tls-ca-file=/etc/kubernetes/ssl/ca.pem
+    - --token-auth-file=/etc/kubernetes/token.csv  
     - --v=2
     livenessProbe:
       httpGet:
@@ -746,6 +774,71 @@ subjects:
 - kind: ServiceAccount
   name: default
   namespace: kube-system
+EOF
+    fi
+
+    local TEMPLATE=/srv/kubernetes/manifests/kube-apiserver-crb.yaml
+    if [ ! -f $TEMPLATE ]; then
+        echo "TEMPLATE: $TEMPLATE"
+        mkdir -p $(dirname $TEMPLATE)
+        cat << EOF > $TEMPLATE
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: ClusterRole
+metadata:
+  annotations:
+    rbac.authorization.kubernetes.io/autoupdate: "true"
+  labels:
+    kubernetes.io/bootstrapping: rbac-defaults
+  name: system:kube-apiserver-to-kubelet
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - nodes/proxy
+      - nodes/stats
+      - nodes/log
+      - nodes/spec
+      - nodes/metrics
+    verbs:
+      - "*"
+---
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: ClusterRoleBinding
+metadata:
+  name: system:kube-apiserver
+  namespace: ""
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:kube-apiserver-to-kubelet
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: User
+    name: kubernetes
+EOF
+    fi
+
+    local TEMPLATE=/srv/kubernetes/manifests/kubelet-crb.yaml
+    if [ ! -f $TEMPLATE ]; then
+        echo "TEMPLATE: $TEMPLATE"
+        mkdir -p $(dirname $TEMPLATE)
+        cat << EOF > $TEMPLATE
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  annotations:
+    rbac.authorization.kubernetes.io/autoupdate: "true"
+  labels:
+    kubernetes.io/bootstrapping: rbac-defaults
+  name: system:node
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:node
+subjects:
+- apiGroup: rbac.authorization.k8s.io
+  kind: Group
+  name: system:nodes
 EOF
     fi
 
@@ -1300,16 +1393,16 @@ EOF
         echo "TEMPLATE: $TEMPLATE"
         mkdir -p $(dirname $TEMPLATE)
         cat << EOF > $TEMPLATE
-# apiVersion: v1
-# kind: Secret
-# metadata:
-#   labels:
-#     k8s-app: kubernetes-dashboard
-#     # Allows editing resource and makes sure it is created first.
-#     addonmanager.kubernetes.io/mode: EnsureExists
-#   name: kubernetes-dashboard-certs
-#   namespace: kube-system
-# type: Opaque
+apiVersion: v1
+kind: Secret
+metadata:
+  labels:
+    k8s-app: kubernetes-dashboard
+    # Allows editing resource and makes sure it is created first.
+    addonmanager.kubernetes.io/mode: EnsureExists
+  name: kubernetes-dashboard-certs
+  namespace: kube-system
+type: Opaque
 ---
 apiVersion: v1
 kind: Secret
@@ -2028,6 +2121,9 @@ function start_addons {
     done
 
     echo
+    echo "K8S: Cluster Role Binding"
+    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/kube-apiserver-crb.yaml
+    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/kubelet-crb.yaml
     echo "K8S: addon cluster admin"
     docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/add-on-cluster-admin-crb.yaml
     echo "K8S: DNS addon"
@@ -2045,7 +2141,7 @@ function start_addons {
     docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/heapster-configmap.yaml
     docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/heapster-deployment.yaml
     echo "K8S: Dashboard addon"
-    if ! [ `docker run --rm --net=host $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl -n kube-system describe secret kubernetes-dashboard-certs` ]; then 
+    if ! curl --silent http://127.0.0.1:8080/api/v1/namespaces/kube-system/secrets | grep kubernetes-dashboard-cert ; then 
       docker run --rm --net=host \
       -v /etc/kubernetes/ssl/dashboard.crt:/certs/dashboard.crt \
       -v /etc/kubernetes/ssl/dashboard.key:/certs/dashboard.key \

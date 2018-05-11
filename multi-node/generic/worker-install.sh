@@ -108,6 +108,7 @@ ExecStartPre=/usr/bin/mkdir -p /etc/cni/net.d
 ExecStartPre=/usr/bin/mkdir -p /var/lib/kubelet/volumeplugins
 ExecStartPre=/usr/bin/mkdir -p /var/lib/rook
 ExecStart=/usr/lib/coreos/kubelet-wrapper \
+  --anonymous-auth=false \
   --node-labels=kubernetes.io/role=node \
   --cni-conf-dir=/etc/cni/net.d \
   --cni-bin-dir=/opt/cni/bin \
@@ -121,8 +122,8 @@ ExecStart=/usr/lib/coreos/kubelet-wrapper \
   --cluster_dns=${DNS_SERVICE_IP} \
   --cluster_domain=cluster.local \
   --kubeconfig=/etc/kubernetes/kubelet.kubeconfig \
-  --require-kubeconfig \
   --bootstrap-kubeconfig=/etc/kubernetes/bootstrap.kubeconfig \
+  --client-ca-file=/etc/kubernetes/ssl/ca.pem \
   --tls-cert-file=/etc/kubernetes/ssl/node.pem \
   --tls-private-key-file=/etc/kubernetes/ssl/node-key.pem \
   --volume-plugin-dir=/etc/kubernetes/volumeplugins \
@@ -209,14 +210,14 @@ clusters:
     server: ${CONTROLLER_ENDPOINT}
     certificate-authority: /etc/kubernetes/ssl/ca.pem
 users:
-- name: kubelet
+- name: system:node:${ADVERTISE_IP}
   user:
     client-certificate: /etc/kubernetes/ssl/node.pem
     client-key: /etc/kubernetes/ssl/node-key.pem
 contexts:
 - context:
     cluster: local
-    user: kubelet
+    user: system:node:${ADVERTISE_IP}
   name: default
 current-context: default
 EOF

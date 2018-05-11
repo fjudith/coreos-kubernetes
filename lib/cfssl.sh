@@ -6,8 +6,16 @@ set -e
 if ! which cfssl cfssl-certinfo cfssljson > /dev/null ; then
     case $(uname -s) in
       "Linux")
+        curl -o /usr/local/bin/cfssl https://pkg.cfssl.org/R1.2/cfssl_linux-amd64
+        curl -o /usr/local/bin/cfssl-certinfo https://pkg.cfssl.org/R1.2/cfssl-certinfo_linux-amd64
+        curl -o /usr/local/bin/cfssljson https://pkg.cfssl.org/R1.2/cfssljson_linux-amd64
+        chmod +x /usr/local/bin/cfssl /usr/local/bin/cfssljson /usr/local/bin/cfssl-certinfo
         ;;
       "Darwin")
+        curl -o /usr/local/bin/cfssl https://pkg.cfssl.org/R1.2/cfssl_darwin-amd64
+        curl -o /usr/local/bin/cfssl-certinfo https://pkg.cfssl.org/R1.2/cfssl-certinfo_darwin-amd64
+        curl -o /usr/local/bin/cfssljson https://pkg.cfssl.org/R1.2/cfssljson_darwin-amd64
+        chmod +x /usr/local/bin/cfssl /usr/local/bin/cfssljson /usr/local/bin/cfssl-certinfo
         ;;
       "MINGW*")
         curl -o /usr/bin/cfssl.exe https://pkg.cfssl.org/R1.2/cfssl_windows-amd64.exe && \
@@ -47,11 +55,11 @@ fi
 # Root CA certificate
 # ---------------------------------------------
 function write-ssl-ca {
-local TEMPLATE=$OUTDIR/ca-config.json
-    if [ ! -f $TEMPLATE ]; then
-        echo "local TEMPLATE: $TEMPLATE"
-        mkdir -p $(dirname $TEMPLATE)
-        cat << EOF > $TEMPLATE
+    # Write cfssl JSON template for signing configuration
+    local TEMPLATE=$OUTDIR/ca-config.json
+    echo "local TEMPLATE: $TEMPLATE"
+    mkdir -p $(dirname $TEMPLATE)
+    cat << EOF > $TEMPLATE
 {
   "signing": {
     "default": {
@@ -71,13 +79,12 @@ local TEMPLATE=$OUTDIR/ca-config.json
   }
 }
 EOF
-    fi
 
-local TEMPLATE=$OUTDIR/ca-csr.json
-    if [ ! -f $TEMPLATE ]; then
-        echo "local TEMPLATE: $TEMPLATE"
-        mkdir -p $(dirname $TEMPLATE)
-        cat << EOF > $TEMPLATE
+    # Write cfssl JSON template
+    local TEMPLATE=$OUTDIR/ca-csr.json
+    echo "local TEMPLATE: $TEMPLATE"
+    mkdir -p $(dirname $TEMPLATE)
+    cat << EOF > $TEMPLATE
 {
   "CN": "kubernetes",
   "key": {
@@ -92,26 +99,24 @@ local TEMPLATE=$OUTDIR/ca-csr.json
   ]
 }
 EOF
-    fi
 
-local CERTIFICATE=$OUTDIR/${CERTBASE}.pem
-    if [ ! -f $CERTIFICATE ]; then
-        echo "local CERTIFICATE: $CERTIFICATE"
-        mkdir -p $(dirname $CERTIFICATE)
-        cfssl gencert -initca $OUTDIR/${CERTBASE}-csr.json | cfssljson -bare $OUTDIR/ca
-    fi
+    local CERTIFICATE=$OUTDIR/${CERTBASE}.pem
+    echo "local CERTIFICATE: $CERTIFICATE"
+    mkdir -p $(dirname $CERTIFICATE)
+    cfssl gencert -initca $OUTDIR/${CERTBASE}-csr.json | cfssljson -bare $OUTDIR/ca
 }
 
 # Etcd certificate
 # ---------------------------------------------
 function write-ssl-etcd {
-ETCD_IP=$(for i in $(printf ${SANS} | tr ',' '\n'); do printf "\"$i\","; done)
+    # Extracting the IP address from the CN (i.e node-xxx.xxx.xxx.xxx)
+    ETCD_IP=$(for i in $(printf ${SANS} | tr ',' '\n'); do printf "\"$i\","; done)
 
-local TEMPLATE=$OUTDIR/${CERTBASE}-csr.json
-    if [ ! -f $TEMPLATE ]; then
-        echo "local TEMPLATE: $TEMPLATE"
-        mkdir -p $(dirname $TEMPLATE)
-        cat << EOF > $TEMPLATE
+    # Write cfssl JSON template
+    local TEMPLATE=$OUTDIR/${CERTBASE}-csr.json
+    echo "local TEMPLATE: $TEMPLATE"
+    mkdir -p $(dirname $TEMPLATE)
+    cat << EOF > $TEMPLATE
 {
   "CN": "${CN}",
   "hosts": [
@@ -130,27 +135,24 @@ local TEMPLATE=$OUTDIR/${CERTBASE}-csr.json
   ]
 }
 EOF
-    fi
 
-CERTIFICATE=$OUTDIR/${CERTBASE}.pem
-    if [ ! -f $CERTIFICATE ]; then
-        echo "local CERTIFICATE: $CERTIFICATE"
-        mkdir -p $(dirname $CERTIFICATE)
-        cfssl gencert -ca=$OUTDIR/ca.pem \
-        -ca-key=$OUTDIR/ca-key.pem \
-        -config=$OUTDIR/ca-config.json \
-        -profile=kubernetes $OUTDIR/${CERTBASE}-csr.json | cfssljson -bare $OUTDIR/etcd
-    fi
+    CERTIFICATE=$OUTDIR/${CERTBASE}.pem
+    echo "local CERTIFICATE: $CERTIFICATE"
+    mkdir -p $(dirname $CERTIFICATE)
+    cfssl gencert -ca=$OUTDIR/ca.pem \
+    -ca-key=$OUTDIR/ca-key.pem \
+    -config=$OUTDIR/ca-config.json \
+    -profile=kubernetes $OUTDIR/${CERTBASE}-csr.json | cfssljson -bare $OUTDIR/etcd
 }
 
 # Admin certificate
 # ---------------------------------------------
 function write-ssl-admin {
-local TEMPLATE=$OUTDIR/${CERTBASE}-csr.json
-    if [ ! -f $TEMPLATE ]; then
-        echo "local TEMPLATE: $TEMPLATE"
-        mkdir -p $(dirname $TEMPLATE)
-        cat << EOF > $TEMPLATE
+    # Write cfssl JSON template
+    local TEMPLATE=$OUTDIR/${CERTBASE}-csr.json
+    echo "local TEMPLATE: $TEMPLATE"
+    mkdir -p $(dirname $TEMPLATE)
+    cat << EOF > $TEMPLATE
 {
   "CN": "admin",
   "hosts": [],
@@ -166,31 +168,32 @@ local TEMPLATE=$OUTDIR/${CERTBASE}-csr.json
   ]
 }
 EOF
-    fi
 
-CERTIFICATE=$OUTDIR/${CERTBASE}.pem
-    if [ ! -f $CERTIFICATE ]; then
-        echo "local CERTIFICATE: $CERTIFICATE"
-        mkdir -p $(dirname $CERTIFICATE)
-        cfssl gencert -ca=$OUTDIR/ca.pem \
-        -ca-key=$OUTDIR/ca-key.pem \
-        -config=$OUTDIR/ca-config.json \
-        -profile=kubernetes $OUTDIR/${CERTBASE}-csr.json | cfssljson -bare $OUTDIR/admin
-    fi
+    local CERTIFICATE=$OUTDIR/${CERTBASE}.pem
+    echo "local CERTIFICATE: $CERTIFICATE"
+    mkdir -p $(dirname $CERTIFICATE)
+    cfssl gencert -ca=$OUTDIR/ca.pem \
+    -ca-key=$OUTDIR/ca-key.pem \
+    -config=$OUTDIR/ca-config.json \
+    -profile=kubernetes $OUTDIR/${CERTBASE}-csr.json | cfssljson -bare $OUTDIR/admin
 }
 
 # Master certificate
 # ---------------------------------------------
 function write-ssl-master {
-MASTER_IP=$(for i in $(printf ${SANS} | tr ',' '\n'); do printf "\"$i\","; done)
+    # Convert SANs to JSON supported array (e.g 1,2,3 --> "1","2","3",) 
+    MASTER_IP=$(for i in $(printf ${SANS} | tr ',' '\n'); do printf "\"$i\","; done)
 
-local TEMPLATE=$OUTDIR/${CERTBASE}-csr.json
-    if [ ! -f $TEMPLATE ]; then
-        echo "local TEMPLATE: $TEMPLATE"
-        mkdir -p $(dirname $TEMPLATE)
-        cat << EOF > $TEMPLATE
+    # Extracting the IP address from the CN (i.e node-xxx.xxx.xxx.xxx)
+    IP_ADDRESS=$(printf ${CN} | awk -F '-' '{print $2}')
+
+    # Write cfssl JSON template
+    local TEMPLATE=$OUTDIR/${CERTBASE}-csr.json
+    echo "local TEMPLATE: $TEMPLATE"
+    mkdir -p $(dirname $TEMPLATE)
+    cat << EOF > $TEMPLATE
 {
-  "CN": "kubernetes",
+  "CN": "system:node:${IP_ADDRESS}",
   "hosts": [
     "127.0.0.1",
     ${MASTER_IP}
@@ -207,35 +210,35 @@ local TEMPLATE=$OUTDIR/${CERTBASE}-csr.json
   },
   "names": [
     {
-      "O": "system:masters",
+      "O": "system:nodes",
       "OU": "CoreOS Kubernetes"
     }
   ]
 }
 EOF
-    fi
 
-CERTIFICATE=$OUTDIR/${CERTBASE}.pem
-    if [ ! -f $CERTIFICATE ]; then
-        echo "local CERTIFICATE: $CERTIFICATE"
-        mkdir -p $(dirname $CERTIFICATE)
-        cfssl gencert -ca=$OUTDIR/ca.pem \
-        -ca-key=$OUTDIR/ca-key.pem \
-        -config=$OUTDIR/ca-config.json \
-        -profile=kubernetes $OUTDIR/${CERTBASE}-csr.json | cfssljson -bare $OUTDIR/${CERTBASE}
-    fi
+    local CERTIFICATE=$OUTDIR/${CERTBASE}.pem
+    echo "local CERTIFICATE: $CERTIFICATE"
+    mkdir -p $(dirname $CERTIFICATE)
+    cfssl gencert -ca=$OUTDIR/ca.pem \
+    -ca-key=$OUTDIR/ca-key.pem \
+    -config=$OUTDIR/ca-config.json \
+    -profile=kubernetes $OUTDIR/${CERTBASE}-csr.json | cfssljson -bare $OUTDIR/${CERTBASE}
 }
 
 # Node certificate
 # ---------------------------------------------
 function write-ssl-node {
-local TEMPLATE=$OUTDIR/${CERTBASE}-csr.json
-    if [ ! -f $TEMPLATE ]; then
-        echo "local TEMPLATE: $TEMPLATE"
-        mkdir -p $(dirname $TEMPLATE)
-        cat << EOF > $TEMPLATE
+    # Extracting the IP address from the CN (i.e node-xxx.xxx.xxx.xxx)
+    IP_ADDRESS=$(printf ${CN} | awk -F '-' '{print $2}')
+    
+    # Write cfssl JSON template
+    local TEMPLATE=$OUTDIR/${CERTBASE}-csr.json
+    echo "local TEMPLATE: $TEMPLATE"
+    mkdir -p $(dirname $TEMPLATE)
+    cat << EOF > $TEMPLATE
 {
-  "CN": "system:node:${CN}",
+  "CN": "system:node:${IP_ADDRESS}",
   "key": {
     "algo": "rsa",
     "size": 2048
@@ -248,28 +251,25 @@ local TEMPLATE=$OUTDIR/${CERTBASE}-csr.json
   ]
 }
 EOF
-    fi
 
-CERTIFICATE=$OUTDIR/${CERTBASE}.pem
-    if [ ! -f $CERTIFICATE ]; then
-        echo "local CERTIFICATE: $CERTIFICATE"
-        mkdir -p $(dirname $CERTIFICATE)
-        cfssl gencert -ca=$OUTDIR/ca.pem \
-        -ca-key=$OUTDIR/ca-key.pem \
-        -config=$OUTDIR/ca-config.json \
-        -hostname=${SANS} \
-        -profile=kubernetes $OUTDIR/${CERTBASE}-csr.json | cfssljson -bare $OUTDIR/${CERTBASE}
-    fi
+    local CERTIFICATE=$OUTDIR/${CERTBASE}.pem
+    echo "local CERTIFICATE: $CERTIFICATE"
+    mkdir -p $(dirname $CERTIFICATE)
+    cfssl gencert -ca=$OUTDIR/ca.pem \
+    -ca-key=$OUTDIR/ca-key.pem \
+    -config=$OUTDIR/ca-config.json \
+    -hostname=${SANS} \
+    -profile=kubernetes $OUTDIR/${CERTBASE}-csr.json | cfssljson -bare $OUTDIR/${CERTBASE}
 }
 
 # Kube-Proxy certificate
 # ---------------------------------------------
 function write-ssl-kube-proxy {
-local TEMPLATE=$OUTDIR/${CERTBASE}-csr.json
-    if [ ! -f $TEMPLATE ]; then
-        echo "local TEMPLATE: $TEMPLATE"
-        mkdir -p $(dirname $TEMPLATE)
-        cat << EOF > $TEMPLATE
+    # Write cfssl JSON template
+    local TEMPLATE=$OUTDIR/${CERTBASE}-csr.json
+    echo "local TEMPLATE: $TEMPLATE"
+    mkdir -p $(dirname $TEMPLATE)
+    cat << EOF > $TEMPLATE
 {
   "CN": "system:kube-proxy",
   "key": {
@@ -284,31 +284,29 @@ local TEMPLATE=$OUTDIR/${CERTBASE}-csr.json
   ]
 }
 EOF
-    fi
 
-CERTIFICATE=$OUTDIR/${CERTBASE}.pem
-    if [ ! -f $CERTIFICATE ]; then
-        echo "local CERTIFICATE: $CERTIFICATE"
-        mkdir -p $(dirname $CERTIFICATE)
-        cfssl gencert -ca=$OUTDIR/ca.pem \
-        -ca-key=$OUTDIR/ca-key.pem \
-        -config=$OUTDIR/ca-config.json \
-        -profile=kubernetes $OUTDIR/${CERTBASE}-csr.json | cfssljson -bare $OUTDIR/${CERTBASE}
-    fi
+    local CERTIFICATE=$OUTDIR/${CERTBASE}.pem
+    echo "local CERTIFICATE: $CERTIFICATE"
+    mkdir -p $(dirname $CERTIFICATE)
+    cfssl gencert -ca=$OUTDIR/ca.pem \
+    -ca-key=$OUTDIR/ca-key.pem \
+    -config=$OUTDIR/ca-config.json \
+    -profile=kubernetes $OUTDIR/${CERTBASE}-csr.json | cfssljson -bare $OUTDIR/${CERTBASE}
 }
 
 # Kube-Apiserver certificate
 # ---------------------------------------------
 function write-ssl-apiserver {
-APISERVER_IP=$(for i in $(printf ${SANS} | tr ',' '\n'); do printf "\"$i\","; done)
+    # Convert SANs to JSON supported array (e.g 1,2,3 --> "1","2","3",) 
+    APISERVER_IP=$(for i in $(printf ${SANS} | tr ',' '\n'); do printf "\"$i\","; done)
 
-local TEMPLATE=$OUTDIR/${CERTBASE}-csr.json
-    if [ ! -f $TEMPLATE ]; then
-        echo "local TEMPLATE: $TEMPLATE"
-        mkdir -p $(dirname $TEMPLATE)
-        cat << EOF > $TEMPLATE
+    # Write cfssl JSON template
+    local TEMPLATE=$OUTDIR/${CERTBASE}-csr.json
+    echo "local TEMPLATE: $TEMPLATE"
+    mkdir -p $(dirname $TEMPLATE)
+    cat << EOF > $TEMPLATE
 {
-  "CN": "{CN}",
+  "CN": "kubernetes",
   "hosts": [
     "127.0.0.1",
     ${APISERVER_IP}
@@ -331,29 +329,26 @@ local TEMPLATE=$OUTDIR/${CERTBASE}-csr.json
   ]
 }
 EOF
-    fi
 
-CERTIFICATE=$OUTDIR/${CERTBASE}.pem
-    if [ ! -f $CERTIFICATE ]; then
-        echo "local CERTIFICATE: $CERTIFICATE"
-        mkdir -p $(dirname $CERTIFICATE)
-        cfssl gencert -ca=$OUTDIR/ca.pem \
-        -ca-key=$OUTDIR/ca-key.pem \
-        -config=$OUTDIR/ca-config.json \
-        -profile=kubernetes $OUTDIR/${CERTBASE}-csr.json | cfssljson -bare $OUTDIR/${CERTBASE}
-    fi
+    local CERTIFICATE=$OUTDIR/${CERTBASE}.pem
+    echo "local CERTIFICATE: $CERTIFICATE"
+    mkdir -p $(dirname $CERTIFICATE)
+    cfssl gencert -ca=$OUTDIR/ca.pem \
+    -ca-key=$OUTDIR/ca-key.pem \
+    -config=$OUTDIR/ca-config.json \
+    -profile=kubernetes $OUTDIR/${CERTBASE}-csr.json | cfssljson -bare $OUTDIR/${CERTBASE}
 }
 
 # Dashboard certificate
 # ---------------------------------------------
 function write-ssl-dashboard {
-local TEMPLATE=$OUTDIR/${CERTBASE}-csr.json
-    if [ ! -f $TEMPLATE ]; then
-        echo "local TEMPLATE: $TEMPLATE"
-        mkdir -p $(dirname $TEMPLATE)
-        cat << EOF > $TEMPLATE
+    # Write cfssl JSON template
+    local TEMPLATE=$OUTDIR/${CERTBASE}-csr.json
+    echo "local TEMPLATE: $TEMPLATE"
+    mkdir -p $(dirname $TEMPLATE)
+    cat << EOF > $TEMPLATE
 {
-  "CN": "dashboard",
+  "CN": "system:serviceaccount:kube-system:kubernetes-dashboard",
   "hosts": [],
   "key": {
     "algo": "rsa",
@@ -361,33 +356,30 @@ local TEMPLATE=$OUTDIR/${CERTBASE}-csr.json
   },
   "names": [
     {
-      "O": "k8s",
+      "O": "system:serviceaccounts:kube-system",
       "OU": "CoreOS Kubernetes"
     }
   ]
 }
 EOF
-    fi
 
-CERTIFICATE=$OUTDIR/${CERTBASE}.pem
-    if [ ! -f $CERTIFICATE ]; then
-        echo "local CERTIFICATE: $CERTIFICATE"
-        mkdir -p $(dirname $CERTIFICATE)
-        cfssl gencert -ca=$OUTDIR/ca.pem \
-        -ca-key=$OUTDIR/ca-key.pem \
-        -config=$OUTDIR/ca-config.json \
-        -profile=kubernetes $OUTDIR/${CERTBASE}-csr.json | cfssljson -bare $OUTDIR/dashboard
-    fi
+    local CERTIFICATE=$OUTDIR/${CERTBASE}.pem
+    echo "local CERTIFICATE: $CERTIFICATE"
+    mkdir -p $(dirname $CERTIFICATE)
+    cfssl gencert -ca=$OUTDIR/ca.pem \
+    -ca-key=$OUTDIR/ca-key.pem \
+    -config=$OUTDIR/ca-config.json \
+    -profile=kubernetes $OUTDIR/${CERTBASE}-csr.json | cfssljson -bare $OUTDIR/dashboard
 }
 
 # Flanneld certificate
 # ---------------------------------------------
 function write-ssl-flanneld {
-local TEMPLATE=$OUTDIR/${CERTBASE}-csr.json
-    if [ ! -f $TEMPLATE ]; then
-        echo "local TEMPLATE: $TEMPLATE"
-        mkdir -p $(dirname $TEMPLATE)
-        cat << EOF > $TEMPLATE
+    # Write cfssl JSON template
+    local TEMPLATE=$OUTDIR/${CERTBASE}-csr.json
+    echo "local TEMPLATE: $TEMPLATE"
+    mkdir -p $(dirname $TEMPLATE)
+    cat << EOF > $TEMPLATE
 {
   "CN": "flanneld",
   "hosts": [],
@@ -403,17 +395,14 @@ local TEMPLATE=$OUTDIR/${CERTBASE}-csr.json
   ]
 }
 EOF
-    fi
 
-CERTIFICATE=$OUTDIR/${CERTBASE}.pem
-    if [ ! -f $CERTIFICATE ]; then
-        echo "local CERTIFICATE: $CERTIFICATE"
-        mkdir -p $(dirname $CERTIFICATE)
-        cfssl gencert -ca=$OUTDIR/ca.pem \
-        -ca-key=$OUTDIR/ca-key.pem \
-        -config=$OUTDIR/ca-config.json \
-        -profile=kubernetes $OUTDIR/${CERTBASE}-csr.json | cfssljson -bare $OUTDIR/${CERTBASE}
-    fi
+    local CERTIFICATE=$OUTDIR/${CERTBASE}.pem
+    echo "local CERTIFICATE: $CERTIFICATE"
+    mkdir -p $(dirname $CERTIFICATE)
+    cfssl gencert -ca=$OUTDIR/ca.pem \
+    -ca-key=$OUTDIR/ca-key.pem \
+    -config=$OUTDIR/ca-config.json \
+    -profile=kubernetes $OUTDIR/${CERTBASE}-csr.json | cfssljson -bare $OUTDIR/${CERTBASE}
 }
 
 

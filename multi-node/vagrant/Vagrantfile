@@ -73,6 +73,9 @@ system('bash', '-c', "./../../lib/cfssl.sh ssl dashboard kubernets-dashboard") o
 FileUtils.mkdir_p("token")
 system('bash', '-c', "./../../lib/init-token.sh token") or abort ("failed generating Bootstrap token artifacts")
 
+# Generate Encryption key Token
+system('bash', '-c', "./../../lib/init-encryptionkey.sh token") or abort ("failed generating Encryption key artifacts")
+
 def provisionMachineSSL(machine,certBaseName,cn,ipAddrs)
   tarFile = "ssl/#{cn}.tar"
   ipString = ipAddrs.map.with_index { |ip, i| "#{ip}"}.join(",")
@@ -217,6 +220,11 @@ Vagrant.configure("2") do |config|
       controller.vm.provision :file, :source => tokenFile, :destination => "/tmp/token.csv"
       controller.vm.provision :shell, :inline => "mv /tmp/token.csv /etc/kubernetes/", :privileged => true
 
+      # Copy Encryption key for Kubernetes ApiServer
+      tokenFile = "token/encryption-key.txt"
+      controller.vm.provision :file, :source => tokenFile, :destination => "/tmp/encryption-key.txt"
+      controller.vm.provision :shell, :inline => "mv /tmp/encryption-key.txt /etc/kubernetes/", :privileged => true
+
       controller.vm.provision :file, :source => env_file, :destination => "/tmp/coreos-kube-options.env"
       controller.vm.provision :shell, :inline => "mkdir -p /run/coreos-kubernetes && mv /tmp/coreos-kube-options.env /run/coreos-kubernetes/options.env", :privileged => true
 
@@ -236,7 +244,7 @@ Vagrant.configure("2") do |config|
 
       env_file = Tempfile.new('env_file', :binmode => true)
       env_file.write("ETCD_ENDPOINTS=#{etcd_endpoints}\n")
-      env_file.write("CONTROLLER_ENDPOINT=https://#{controllerIPs[0]}\n") #TODO(aaron): LB or DNS across control nodes
+      env_file.write("CONTROLLER_ENDPOINT=https://#{controllerIPs[0]}:6443\n") #TODO(aaron): LB or DNS across control nodes
       env_file.write("FLANNEL_IFACE=#{flannel_iface}\n")
       env_file.close
 
