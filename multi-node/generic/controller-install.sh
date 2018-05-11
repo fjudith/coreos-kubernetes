@@ -581,7 +581,7 @@ spec:
     command:
     - /hyperkube
     - apiserver
-    - --admission-control=NamespaceLifecycle,LimitRanger,ServiceAccount,PersistentVolumeLabel,DefaultStorageClass,DefaultTolerationSeconds,MutatingAdmissionWebhook,ValidatingAdmissionWebhook,ResourceQuota,NodeRestriction
+    - --admission-control=NamespaceLifecycle,NodeRestriction,LimitRanger,ServiceAccount,PersistentVolumeLabel,DefaultStorageClass,DefaultTolerationSeconds,MutatingAdmissionWebhook,ValidatingAdmissionWebhook,ResourceQuota
     - --advertise-address=${ADVERTISE_IP}
     - --allow-privileged=true
     - --anonymous-auth=false
@@ -591,7 +591,7 @@ spec:
     - --audit-log-maxsize=100
     - --audit-log-path=/var/log/kube-audit/audit.log
     - --audit-policy-file=/etc/kubernetes/audit-policy.yaml
-    - --authorization-mode=RBAC,Node
+    - --authorization-mode=Node,RBAC
     - --bind-address=0.0.0.0
     - --client-ca-file=/etc/kubernetes/ssl/ca.pem
     - --enable-bootstrap-token-auth
@@ -600,7 +600,6 @@ spec:
     # - --etcd-cafile=/etc/etcd/ssl/etcd-root-ca.pem
     # - --etcd-certfile=/etc/etcd/ssl/etcd.pem
     # - --etcd-keyfile=/etc/etcd/ssl/etcd-key.pem
-    # - --runtime-config=batch/v2alpha1=true
     - --etcd-servers=${ETCD_ENDPOINTS}
     - --event-ttl=1h
     # - --experimental-encryption-provider-config=/etc/kubernetes/encryption-config.yaml \\
@@ -612,7 +611,7 @@ spec:
     - --kubelet-https=true
     - --runtime-config=api/all
     # - --runtime-config=extensions/v1beta1/networkpolicies=true
-    - --service-account-key-file=/etc/kubernetes/ssl/ca-key.pem
+    - --service-account-key-file=/etc/kubernetes/ssl/apiserver-key.pem
     - --service-cluster-ip-range=${SERVICE_IP_RANGE}
     - --service-node-port-range=30000-50000
     - --storage-media-type=application/json
@@ -881,6 +880,7 @@ rules:
   verbs:
   - list
   - watch
+  - get
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -923,7 +923,6 @@ data:
             pods insecure
             upstream
             fallthrough in-addr.arpa ip6.arpa
-            endpoint ${ETCD_ENDPOINTS//[\,]/" "}
         }
         prometheus :9153
         proxy . /etc/resolv.conf
@@ -2123,9 +2122,9 @@ function start_addons {
     echo
     echo "K8S: Cluster Role Binding"
     docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/kube-apiserver-crb.yaml
-    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/kubelet-crb.yaml
+    #docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/kubelet-crb.yaml
     echo "K8S: addon cluster admin"
-    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/add-on-cluster-admin-crb.yaml
+    # docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/add-on-cluster-admin-crb.yaml
     echo "K8S: DNS addon"
     docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/coredns-service.yaml
     docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/coredns-serviceaccount.yaml
