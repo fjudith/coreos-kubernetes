@@ -676,6 +676,7 @@ spec:
     command:
     - /hyperkube
     - controller-manager
+    - --address=0.0.0.0
     - --master=http://127.0.0.1:8080
     - --leader-elect=true
     - --feature-gates=RotateKubeletServerCertificate=true
@@ -740,6 +741,7 @@ spec:
     command:
     - /hyperkube
     - scheduler
+    - --address=0.0.0.0
     - --master=http://127.0.0.1:8080
     - --leader-elect=true
     - --v=2
@@ -1157,30 +1159,30 @@ EOF
 apiVersion: extensions/v1beta1
 kind: Deployment
 metadata:
-  name: heapster-v1.5.2
+  name: heapster-v1.5.3
   namespace: kube-system
   labels:
     k8s-app: heapster
     kubernetes.io/cluster-service: "true"
     addonmanager.kubernetes.io/mode: Reconcile
-    version: v1.5.2
+    version: v1.5.3
 spec:
   replicas: 1
   selector:
     matchLabels:
       k8s-app: heapster
-      version: v1.5.2
+      version: v1.5.3
   template:
     metadata:
       labels:
         k8s-app: heapster
-        version: v1.5.2
+        version: v1.5.3
       annotations:
         scheduler.alpha.kubernetes.io/critical-pod: ''
     spec:
       priorityClassName: system-cluster-critical
       containers:
-        - image: k8s.gcr.io/heapster-amd64:v1.5.2
+        - image: k8s.gcr.io/heapster-amd64:v1.5.3
           name: heapster
           livenessProbe:
             httpGet:
@@ -1192,6 +1194,13 @@ spec:
           command:
             - /heapster
             - --source=kubernetes.summary_api:''
+            - --sink=influxdb:http://monitoring-influxdb:8086
+        - image: k8s.gcr.io/heapster-amd64:v1.5.3
+          name: eventer
+          command:
+            - /eventer
+            - --source=kubernetes:''
+            - --sink=influxdb:http://monitoring-influxdb:8086
         - image: k8s.gcr.io/addon-resizer:1.8.1
           name: heapster-nanny
           resources:
@@ -1221,14 +1230,50 @@ spec:
             - --memory=200Mi
             - --extra-memory=4Mi
             - --threshold=5
-            - --deployment=heapster-v1.5.2
+            - --deployment=heapster-v1.5.3
             - --container=heapster
+            - --poll-period=300000
+            - --estimator=exponential
+        - image: k8s.gcr.io/addon-resizer:1.8.1
+          name: eventer-nanny
+          resources:
+            limits:
+              cpu: 50m
+              memory: 200Mi
+            requests:
+              cpu: 50m
+              memory: 200Mi
+          env:
+            - name: MY_POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: MY_POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          volumeMounts:
+          - name: eventer-config-volume
+            mountPath: /etc/config
+          command:
+            - /pod_nanny
+            - --config-dir=/etc/config
+            - --cpu=100m
+            - --extra-cpu=0m
+            - --memory=190Mi
+            - --extra-memory=50Mi
+            - --threshold=5
+            - --deployment=heapster-v1.5.3
+            - --container=eventer
             - --poll-period=300000
             - --estimator=exponential
       volumes:
         - name: heapster-config-volume
           configMap:
             name: heapster-config
+        - name: eventer-config-volume
+          configMap:
+            name: eventer-config
       serviceAccountName: heapster
       tolerations:
         - key: "CriticalAddonsOnly"
@@ -1243,10 +1288,10 @@ EOF
         cat << EOF > $TEMPLATE
 kind: Service
 apiVersion: v1
-metadata: 
+metadata:
   name: heapster
   namespace: kube-system
-  labels: 
+  labels:
     kubernetes.io/cluster-service: "true"
     addonmanager.kubernetes.io/mode: Reconcile
     kubernetes.io/name: "Heapster"
@@ -1292,6 +1337,187 @@ data:
   NannyConfiguration: |-
     apiVersion: nannyconfig/v1alpha1
     kind: NannyConfiguration
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: eventer-config
+  namespace: kube-system
+  labels:
+    kubernetes.io/cluster-service: "true"
+    addonmanager.kubernetes.io/mode: EnsureExists
+data:
+  NannyConfiguration: |-
+    apiVersion: nannyconfig/v1alpha1
+    kind: NannyConfiguration
+EOF
+    fi
+
+    local TEMPLATE=/srv/kubernetes/manifests/heapster-rbac.yaml
+    if [ ! -f $TEMPLATE ]; then
+        echo "TEMPLATE: $TEMPLATE"
+        mkdir -p $(dirname $TEMPLATE)
+        cat << EOF > $TEMPLATE
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1beta1
+metadata:
+  name: heapster
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:heapster
+subjects:
+- kind: ServiceAccount
+  name: heapster
+  namespace: kube-system
+EOF
+    fi
+
+    local TEMPLATE=/srv/kubernetes/manifests/heapster-influxdb-grafana-deployment.yaml
+    if [ ! -f $TEMPLATE ]; then
+        echo "TEMPLATE: $TEMPLATE"
+        mkdir -p $(dirname $TEMPLATE)
+        cat << EOF > $TEMPLATE
+kind: Deployment
+apiVersion: extensions/v1beta1
+metadata:
+  name: monitoring-influxdb-grafana-v4
+  namespace: kube-system
+  labels:
+    k8s-app: influxGrafana
+    version: v4
+    kubernetes.io/cluster-service: "true"
+    addonmanager.kubernetes.io/mode: Reconcile
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      k8s-app: influxGrafana
+      version: v4
+  template:
+    metadata:
+      labels:
+        k8s-app: influxGrafana
+        version: v4
+      annotations:
+        scheduler.alpha.kubernetes.io/critical-pod: ''
+    spec:
+      priorityClassName: system-cluster-critical
+      tolerations:
+      - key: node-role.kubernetes.io/master
+        effect: NoSchedule
+      - key: "CriticalAddonsOnly"
+        operator: "Exists"
+      containers:
+        - name: influxdb
+          image: k8s.gcr.io/heapster-influxdb-amd64:v1.3.3
+          resources:
+            limits:
+              cpu: 100m
+              memory: 500Mi
+            requests:
+              cpu: 100m
+              memory: 500Mi
+          ports:
+            - name: http
+              containerPort: 8083
+            - name: api
+              containerPort: 8086
+          volumeMounts:
+          - name: influxdb-persistent-storage
+            mountPath: /data
+        - name: grafana
+          image: k8s.gcr.io/heapster-grafana-amd64:v4.4.3
+          env:
+          resources:
+            # keep request = limit to keep this container in guaranteed class
+            limits:
+              cpu: 100m
+              memory: 100Mi
+            requests:
+              cpu: 100m
+              memory: 100Mi
+          env:
+            # This variable is required to setup templates in Grafana.
+            - name: INFLUXDB_SERVICE_URL
+              value: http://monitoring-influxdb:8086
+              # The following env variables are required to make Grafana accessible via
+              # the kubernetes api-server proxy. On production clusters, we recommend
+              # removing these env variables, setup auth for grafana, and expose the grafana
+              # service using a LoadBalancer or a public IP.
+            - name: GF_AUTH_BASIC_ENABLED
+              value: "false"
+            - name: GF_AUTH_ANONYMOUS_ENABLED
+              value: "true"
+            - name: GF_AUTH_ANONYMOUS_ORG_ROLE
+              value: Admin
+            - name: GF_SERVER_ROOT_URL
+              value: /api/v1/namespaces/kube-system/services/monitoring-grafana/proxy/
+          ports:
+          - name: ui
+            containerPort: 3000
+          volumeMounts:
+          - name: grafana-persistent-storage
+            mountPath: /var
+      volumes:
+      - name: influxdb-persistent-storage
+        emptyDir: {}
+      - name: grafana-persistent-storage
+        emptyDir: {}
+EOF
+    fi
+
+    local TEMPLATE=/srv/kubernetes/manifests/heapster-influxdb-service.yaml
+    if [ ! -f $TEMPLATE ]; then
+        echo "TEMPLATE: $TEMPLATE"
+        mkdir -p $(dirname $TEMPLATE)
+        cat << EOF > $TEMPLATE
+apiVersion: v1
+kind: Service
+metadata:
+  name: monitoring-influxdb
+  namespace: kube-system
+  labels:
+    kubernetes.io/cluster-service: "true"
+    addonmanager.kubernetes.io/mode: Reconcile
+    kubernetes.io/name: "InfluxDB"
+spec:
+  ports:
+    - name: http
+      port: 8083
+      targetPort: 8083
+    - name: api
+      port: 8086
+      targetPort: 8086
+  selector:
+    k8s-app: influxGrafana
+EOF
+    fi
+
+    local TEMPLATE=/srv/kubernetes/manifests/heapster-grafana-service.yaml
+    if [ ! -f $TEMPLATE ]; then
+        echo "TEMPLATE: $TEMPLATE"
+        mkdir -p $(dirname $TEMPLATE)
+        cat << EOF > $TEMPLATE
+apiVersion: v1
+kind: Service
+metadata:
+  name: monitoring-grafana
+  namespace: kube-system
+  labels:
+    kubernetes.io/cluster-service: "true"
+    addonmanager.kubernetes.io/mode: Reconcile
+    kubernetes.io/name: "Grafana"
+spec:
+  # On production clusters, consider setting up auth for grafana, and
+  # exposing Grafana either using a LoadBalancer or a public IP.
+  # type: LoadBalancer
+  ports:
+    - port: 80
+      protocol: TCP
+      targetPort: ui
+  selector:
+    k8s-app: influxGrafana
 EOF
     fi
 
@@ -2138,7 +2364,12 @@ function start_addons {
     docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/heapster-service.yaml
     docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/heapster-serviceaccount.yaml
     docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/heapster-configmap.yaml
+    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/heapster-rbac.yaml
     docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/heapster-deployment.yaml
+    echo "K8S: Heapster graphana addon"
+    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/heapster-influxdb-service.yaml
+    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/heapster-grafana-service.yaml
+    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/heapster-influxdb-grafana-deployment.yaml
     echo "K8S: Dashboard addon"
     if ! curl --silent http://127.0.0.1:8080/api/v1/namespaces/kube-system/secrets | grep kubernetes-dashboard-cert ; then 
       docker run --rm --net=host \
