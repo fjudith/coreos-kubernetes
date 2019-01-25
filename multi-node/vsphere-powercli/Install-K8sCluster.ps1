@@ -209,7 +209,6 @@ PARAM(
     [parameter(mandatory=$false)][Int]$ControllerCIDR = 24,
     [parameter(mandatory=$false)][Int]$ControllerStartFrom = 100,
     [parameter(mandatory=$false)][String]$ControllerGateway = '192.168.251.254',
-    [parameter(mandatory=$false)][string[]]$ControllerHardDisk = @(2GB ; 4GB ; 6GB),
 
     # Kubernetes Worker configuration
     [parameter(mandatory=$false)][String]$WorkerNamePrefix = 'work',
@@ -353,7 +352,7 @@ PROCESS{
 
     if($VMHost)
     {
-        New-K8sControllerCluster -VMhost $VMHost -MemoryMB $ControllerVMMemory -numCPU $ControllerVMCpu -HardDisk $ControllerHardDisk `
+        New-K8sControllerCluster -VMhost $VMHost -MemoryMB $ControllerVMMemory -numCPU $ControllerVMCpu `
         -Subnet $ControllerSubnet -CIDR $ControllerCIDR -Gateway $ControllerGateway -DNS $DnsServer `
         -StartFrom $ControllerStartFrom -Count $ControllerCount -NamePrefix $ControllerNamePrefix `
         -DataStore $ControllerDatastore -PortGroup $ControllerPortGroup -DiskstorageFormat $DiskStorageFormat `
@@ -363,7 +362,7 @@ PROCESS{
     }
     ElseIf($Cluster)
     {
-        New-K8sControllerCluster -Cluster $Cluster -MemoryMB $ControllerVMMemory -numCPU $ControllerVMCpu -HardDisk $ContorllerHardDisk `
+        New-K8sControllerCluster -Cluster $Cluster -MemoryMB $ControllerVMMemory -numCPU $ControllerVMCpu `
         -Subnet $ControllerSubnet -CIDR $ControllerCIDR -Gateway $ControllerGateway -DNS $DnsServer `
         -StartFrom $ControllerStartFrom -Count $ControllerCount -NamePrefix $ControllerNamePrefix `
         -DataStore $ControllerDatastore -PortGroup $ControllerPortGroup -DiskstorageFormat $DiskStorageFormat `

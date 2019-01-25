@@ -4,11 +4,19 @@ set -e
 # List of etcd servers (http://ip:port), comma separated
 export ETCD_ENDPOINTS=
 
+# Interface to be mapped
+export FLANNEL_IFACE=
+
 # Specify the version (vX.Y.Z) of Kubernetes assets to deploy
-export K8S_VER=v1.7.12_coreos.0
+# https://kubernetes.io/docs/reference/workloads-18-19/
+export K8S_VER=v1.10.2_coreos.0
 
 # Hyperkube image repository to use.
 export HYPERKUBE_IMAGE_REPO=quay.io/coreos/hyperkube
+
+# CNI plugin
+# https://github.com/containernetworking/plugins/releases
+export CNI_VER=0.7.0
 
 # The CIDR network to use for pod IPs.
 # Each pod launched in the cluster will be assigned an IP out of this range.
@@ -29,6 +37,8 @@ export K8S_SERVICE_IP=10.3.0.1
 # This IP must be in the range of the SERVICE_IP_RANGE and cannot be the first IP in the range.
 # This same IP must be configured on all worker nodes to enable DNS service discovery.
 export DNS_SERVICE_IP=10.3.0.10
+
+export DNS_DOMAIN=cluster.local
 
 # Whether to use Calico for Kubernetes network policy.
 export USE_CALICO=false
@@ -68,6 +78,8 @@ function init_config {
     done
 }
 
+
+# https://github.com/coreos/flannel/issues/535
 function init_flannel {
     echo "Waiting for etcd..."
     while true
@@ -88,6 +100,179 @@ function init_flannel {
     RES=$(curl --silent -X PUT -d "value={\"Network\":\"$POD_NETWORK\",\"Backend\":{\"Type\":\"vxlan\"}}" "$ACTIVE_ETCD/v2/keys/coreos.com/network/config?prevExist=false")
     if [ -z "$(echo $RES | grep '"action":"create"')" ] && [ -z "$(echo $RES | grep 'Key already exists')" ]; then
         echo "Unexpected error configuring flannel pod network: $RES"
+    fi
+    
+    local TEMPLATE=/srv/kubernetes/manifests/flannel.yaml
+    if [ ! -f $TEMPLATE ]; then
+        echo "TEMPLATE: $TEMPLATE"
+        mkdir -p $(dirname $TEMPLATE)
+        cat << EOF > $TEMPLATE
+---
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1beta1
+metadata:
+  name: flannel
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - pods
+    verbs:
+      - get
+  - apiGroups:
+      - ""
+    resources:
+      - nodes
+    verbs:
+      - list
+      - watch
+  - apiGroups:
+      - ""
+    resources:
+      - nodes/status
+    verbs:
+      - patch
+---
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1beta1
+metadata:
+  name: flannel
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: flannel
+subjects:
+- kind: ServiceAccount
+  name: flannel
+  namespace: kube-system
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: flannel
+  namespace: kube-system
+---
+kind: ConfigMap
+apiVersion: v1
+metadata:
+  name: kube-flannel-cfg
+  namespace: kube-system
+  labels:
+    tier: node
+    app: flannel
+data:
+  cni-conf.json: |
+    {
+      "name": "cbr0",
+      "plugins": [
+        {
+          "type": "flannel",
+          "delegate": {
+            "hairpinMode": true,
+            "isDefaultGateway": true
+          }
+        },
+        {
+          "type": "portmap",
+          "capabilities": {
+            "portMappings": true
+          }
+        }
+      ]
+    }
+  net-conf.json: |
+    {
+      "Network": "${POD_NETWORK}",
+      "Backend": {
+        "Type": "vxlan"
+      }
+    }
+---
+apiVersion: extensions/v1beta1
+kind: DaemonSet
+metadata:
+  name: kube-flannel-ds
+  namespace: kube-system
+  labels:
+    tier: node
+    app: flannel
+spec:
+  template:
+    metadata:
+      labels:
+        tier: node
+        app: flannel
+    spec:
+      hostNetwork: true
+      nodeSelector:
+        beta.kubernetes.io/arch: amd64
+      tolerations:
+      - key: node-role.kubernetes.io/master
+        operator: Exists
+        effect: NoSchedule
+      serviceAccountName: flannel
+      initContainers:
+      - name: install-cni
+        image: quay.io/coreos/flannel:v0.10.0-amd64
+        command:
+        - cp
+        args:
+        - -f
+        - /etc/kube-flannel/cni-conf.json
+        - /etc/cni/net.d/10-flannel.conflist
+        volumeMounts:
+        - name: cni
+          mountPath: /etc/cni/net.d
+        - name: flannel-cfg
+          mountPath: /etc/kube-flannel/
+      containers:
+      - name: kube-flannel
+        image: quay.io/coreos/flannel:v0.10.0-amd64
+        command:
+        - /opt/bin/flanneld
+        args:
+        - --ip-masq
+        - --iface=${FLANNEL_IFACE}
+        #- --kube-subnet-mgr
+        #- -v 10
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "50Mi"
+          limits:
+            cpu: "100m"
+            memory: "50Mi"
+        securityContext:
+          privileged: true
+        env:
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: FLANNELD_ETCD_ENDPOINTS
+          value: ${ETCD_ENDPOINTS}
+        - name: FLANNELD_ETCD_PREFIX
+          value: /coreos.com/network
+        volumeMounts:
+        - name: run
+          mountPath: /run
+        - name: flannel-cfg
+          mountPath: /etc/kube-flannel/
+      volumes:
+        - name: run
+          hostPath:
+            path: /run
+        - name: cni
+          hostPath:
+            path: /etc/cni/net.d
+        - name: flannel-cfg
+          configMap:
+            name: kube-flannel-cfg
+EOF
     fi
 }
 
@@ -117,30 +302,113 @@ Environment="RKT_RUN_ARGS=--uuid-file-save=${uuid_file} \
   --mount volume=modprobe,target=/usr/sbin/modprobe \
   --volume lib-modules,kind=host,source=/lib/modules \
   --mount volume=lib-modules,target=/lib/modules \
+  --volume etc-cni-netd,kind=host,source=/etc/cni/net.d \
+  --mount volume=etc-cni-netd,target=/etc/cni/net.d \
   ${CALICO_OPTS}"
 ExecStartPre=/usr/bin/mkdir -p /etc/kubernetes/manifests
 ExecStartPre=/usr/bin/mkdir -p /opt/cni/bin
+ExecStartPre=/usr/bin/mkdir -p /etc/cni/net.d
 ExecStartPre=/usr/bin/mkdir -p /var/log/containers
+ExecStartPre=/usr/bin/mkdir -p /var/lib/kubelet/volumeplugins
+ExecStartPre=/usr/bin/mkdir -p /var/lib/rook
 ExecStartPre=-/usr/bin/rkt rm --uuid-file=${uuid_file}
+ExecStartPre=/usr/bin/mkdir -p /var/lib/kubelet/volumeplugins
+ExecStartPre=/usr/bin/mkdir -p /var/lib/rook
 ExecStart=/usr/lib/coreos/kubelet-wrapper \
-  --api-servers=http://127.0.0.1:8080 \
-  --register-schedulable=true \
-  --cni-conf-dir=/etc/kubernetes/cni/net.d \
+  --anonymous-auth=false \
+  --cni-conf-dir=/etc/cni/net.d \
+  --cni-bin-dir=/opt/cni/bin \
   --network-plugin=cni \
   --container-runtime=${CONTAINER_RUNTIME} \
   --rkt-path=/usr/bin/rkt \
-  --rkt-stage1-image=coreos.com/rkt/stage1-coreos \
   --allow-privileged=true \
   --pod-manifest-path=/etc/kubernetes/manifests \
+  --kubeconfig=/etc/kubernetes/kubelet.kubeconfig \
+  --node-labels=kubernetes.io/role=master \
+  --register-with-taints=node-role.kubernetes.io/master=:NoSchedule \
+  --client-ca-file=/etc/kubernetes/ssl/ca.pem \
   --hostname-override=${ADVERTISE_IP} \
   --cluster_dns=${DNS_SERVICE_IP} \
-  --cluster_domain=cluster.local
+  --cluster_domain=cluster.local \
+  --volume-plugin-dir=/etc/kubernetes/volumeplugins \
+  --client-ca-file=/etc/kubernetes/ssl/ca.pem \
+  --tls-cert-file=/etc/kubernetes/ssl/master.pem \
+  --tls-private-key-file=/etc/kubernetes/ssl/master-key.pem \
+  --authentication-token-webhook=true \
+  --authorization-mode=Webhook \
+  --v=2
 ExecStop=-/usr/bin/rkt stop --uuid-file=${uuid_file}
 Restart=always
 RestartSec=10
 
 [Install]
 WantedBy=multi-user.target
+EOF
+    fi
+
+    local TEMPLATE=/etc/kubernetes/kubelet.kubeconfig
+    if [ ! -f $TEMPLATE ]; then
+        echo "TEMPLATE: $TEMPLATE"
+        mkdir -p $(dirname $TEMPLATE)
+        cat << EOF > $TEMPLATE
+apiVersion: v1
+kind: Config
+clusters:
+- name: local
+  cluster:
+    server: http://127.0.0.1:8080
+users:
+- name: kubelet
+contexts:
+- context:
+    cluster: local
+    user: kubelet
+  name: kubelet-context
+current-context: kubelet-context
+EOF
+    fi
+
+    local TEMPLATE=/etc/kubernetes/bootstrap.kubeconfig
+    if [ ! -f $TEMPLATE ]; then
+        echo "TEMPLATE: $TEMPLATE"
+        mkdir -p $(dirname $TEMPLATE)
+        cat << EOF > $TEMPLATE
+apiVersion: v1
+kind: Config
+clusters:
+- name: local
+  cluster:
+    server: https://127.0.0.1:6443
+    certificate-authority: /etc/kubernetes/ssl/ca.pem
+users:
+- name: kubelet-bootstrap
+  user:
+    token: $(cat /etc/kubernetes/token.csv | awk -F ',' '{print $1}')
+contexts:
+- context:
+    cluster: local
+    user: kubelet-bootstrap
+  name: default
+current-context: default
+EOF
+    fi
+
+    local TEMPLATE=/etc/kubernetes/encryption-config.yaml
+    if [ ! -f $TEMPLATE ]; then
+        echo "TEMPLATE: $TEMPLATE"
+        mkdir -p $(dirname $TEMPLATE)
+        cat << EOF > $TEMPLATE
+kind: EncryptionConfig
+apiVersion: v1
+resources:
+  - resources:
+      - secrets
+    providers:
+      - aescbc:
+          keys:
+            - name: key1
+              secret: $(cat /etc/kubernetes/encryption-key.txt)
+      - identity: {}
 EOF
     fi
 
@@ -203,6 +471,32 @@ RequiredBy=kubelet.service
 EOF
     fi
 
+    local TEMPLATE=/etc/kubernetes/kube-proxy.kubeconfig
+    if [ ! -f $TEMPLATE ]; then
+        echo "TEMPLATE: $TEMPLATE"
+        mkdir -p $(dirname $TEMPLATE)
+        cat << EOF > $TEMPLATE
+apiVersion: v1
+kind: Config
+clusters:
+- name: local
+  cluster:
+    server: https://127.0.0.1:6443
+    certificate-authority: /etc/kubernetes/ssl/ca.pem
+users:
+- name: kube-proxy
+  user:
+    client-certificate: /etc/kubernetes/ssl/kube-proxy.pem
+    client-key: /etc/kubernetes/ssl/kube-proxy-key.pem
+contexts:
+- context:
+    cluster: local
+    user: kube-proxy
+  name: default
+current-context: default
+EOF
+    fi
+
     local TEMPLATE=/etc/kubernetes/manifests/kube-proxy.yaml
     if [ ! -f $TEMPLATE ]; then
         echo "TEMPLATE: $TEMPLATE"
@@ -225,22 +519,49 @@ spec:
     - proxy
     - --master=http://127.0.0.1:8080
     - --cluster-cidr=${POD_NETWORK}
+    - --masquerade-all
+    - --kubeconfig=/etc/kubernetes/kube-proxy.kubeconfig
+    - --v=2
     securityContext:
       privileged: true
     volumeMounts:
     - mountPath: /etc/ssl/certs
-      name: ssl-certs-host
+      name: "ssl-certs"
+    - mountPath: /etc/kubernetes/kube-proxy.kubeconfig
+      name: "kubeconfig"
+      readOnly: true
+    - mountPath: /etc/kubernetes/ssl
+      name: "etc-kube-ssl"
       readOnly: true
     - mountPath: /var/run/dbus
       name: dbus
       readOnly: false
   volumes:
-  - hostPath:
-      path: /usr/share/ca-certificates
-    name: ssl-certs-host
+  - name: "ssl-certs"
+    hostPath:
+      path: "/usr/share/ca-certificates"
+  - name: "kubeconfig"
+    hostPath:
+      path: "/etc/kubernetes/kube-proxy.kubeconfig"
+  - name: "etc-kube-ssl"
+    hostPath:
+      path: "/etc/kubernetes/ssl"
   - hostPath:
       path: /var/run/dbus
     name: dbus
+EOF
+    fi
+
+    local TEMPLATE=/etc/kubernetes/audit-policy.yaml
+    if [ ! -f $TEMPLATE ]; then
+        echo "TEMPLATE: $TEMPLATE"
+        mkdir -p $(dirname $TEMPLATE)
+        cat << EOF > $TEMPLATE
+# Log all requests at the Metadata level.
+apiVersion: audit.k8s.io/v1beta1
+kind: Policy
+rules:
+- level: Metadata
 EOF
     fi
 
@@ -262,22 +583,45 @@ spec:
     command:
     - /hyperkube
     - apiserver
-    - --bind-address=0.0.0.0
-    - --etcd-servers=${ETCD_ENDPOINTS}
-    - --allow-privileged=true
-    - --authorization-mode=RBAC
-    - --service-cluster-ip-range=${SERVICE_IP_RANGE}
-    - --secure-port=443
+    - --admission-control=NamespaceLifecycle,NodeRestriction,LimitRanger,ServiceAccount,PersistentVolumeLabel,DefaultStorageClass,DefaultTolerationSeconds,MutatingAdmissionWebhook,ValidatingAdmissionWebhook,ResourceQuota
     - --advertise-address=${ADVERTISE_IP}
-    - --admission-control=NamespaceLifecycle,LimitRanger,ServiceAccount,DefaultStorageClass,ResourceQuota
+    - --allow-privileged=true
+    - --anonymous-auth=false
+    - --apiserver-count=3
+    - --audit-log-maxage=30
+    - --audit-log-maxbackup=3
+    - --audit-log-maxsize=100
+    - --audit-log-path=/var/log/kube-audit/audit.log
+    - --audit-policy-file=/etc/kubernetes/audit-policy.yaml
+    - --authorization-mode=Node,RBAC
+    - --bind-address=0.0.0.0
+    - --client-ca-file=/etc/kubernetes/ssl/ca.pem
+    - --enable-bootstrap-token-auth
+    - --enable-swagger-ui=true
+    - --storage-backend=etcd3
+    # - --etcd-cafile=/etc/etcd/ssl/etcd-root-ca.pem
+    # - --etcd-certfile=/etc/etcd/ssl/etcd.pem
+    # - --etcd-keyfile=/etc/etcd/ssl/etcd-key.pem
+    - --etcd-servers=${ETCD_ENDPOINTS}
+    - --event-ttl=1h
+    # - --experimental-encryption-provider-config=/etc/kubernetes/encryption-config.yaml \\
+    - --insecure-bind-address=127.0.0.1
+    # https://kubernetes.io/docs/admin/kubelet-authentication-authorization/#kubelet-authentication
+    - --kubelet-certificate-authority=/etc/kubernetes/ssl/ca.pem
+    - --kubelet-client-certificate=/etc/kubernetes/ssl/apiserver.pem
+    - --kubelet-client-key=/etc/kubernetes/ssl/apiserver-key.pem
+    - --kubelet-https=true
+    - --runtime-config=api/all
+    # - --runtime-config=extensions/v1beta1/networkpolicies=true
+    - --service-account-key-file=/etc/kubernetes/ssl/apiserver-key.pem
+    - --service-cluster-ip-range=${SERVICE_IP_RANGE}
+    - --service-node-port-range=30000-50000
+    - --storage-media-type=application/json
     - --tls-cert-file=/etc/kubernetes/ssl/apiserver.pem
     - --tls-private-key-file=/etc/kubernetes/ssl/apiserver-key.pem
-    - --client-ca-file=/etc/kubernetes/ssl/ca.pem
-    - --service-account-key-file=/etc/kubernetes/ssl/apiserver-key.pem
-    - --runtime-config=extensions/v1beta1/networkpolicies=true
-    - --anonymous-auth=false
-    - --storage-backend=etcd2
-    - --storage-media-type=application/json
+    - --tls-ca-file=/etc/kubernetes/ssl/ca.pem
+    - --token-auth-file=/etc/kubernetes/token.csv  
+    - --v=2
     livenessProbe:
       httpGet:
         host: 127.0.0.1
@@ -286,9 +630,11 @@ spec:
       initialDelaySeconds: 15
       timeoutSeconds: 15
     ports:
-    - containerPort: 443
-      hostPort: 443
+    - containerPort: 6443
+      hostPort: 6443
       name: https
+    - containerPort: 7080
+      hostPort: 7080
     - containerPort: 8080
       hostPort: 8080
       name: local
@@ -299,7 +645,13 @@ spec:
     - mountPath: /etc/ssl/certs
       name: ssl-certs-host
       readOnly: true
+    - mountPath: /etc/kubernetes
+      name: config-kubernetes
+      readOnly: true
   volumes:
+  - hostPath:
+      path: /etc/kubernetes
+    name: config-kubernetes
   - hostPath:
       path: /etc/kubernetes/ssl
     name: ssl-certs-kubernetes
@@ -326,10 +678,19 @@ spec:
     command:
     - /hyperkube
     - controller-manager
+    - --address=0.0.0.0
     - --master=http://127.0.0.1:8080
     - --leader-elect=true
+    - --feature-gates=RotateKubeletServerCertificate=true
     - --service-account-private-key-file=/etc/kubernetes/ssl/apiserver-key.pem
     - --root-ca-file=/etc/kubernetes/ssl/ca.pem
+    - --flex-volume-plugin-dir=/etc/kubernetes/volumeplugins
+    - --cluster-signing-cert-file=/etc/kubernetes/ssl/ca.pem
+    - --cluster-signing-key-file=/etc/kubernetes/ssl/ca-key.pem
+    - --node-monitor-grace-period=40s
+    - --node-monitor-period=5s
+    - --pod-eviction-timeout=5m0s
+    - --v=2
     resources:
       requests:
         cpu: 200m
@@ -347,6 +708,9 @@ spec:
     - mountPath: /etc/ssl/certs
       name: ssl-certs-host
       readOnly: true
+    - mountPath: /etc/kubernetes/volumeplugins
+      name: volumeplugins-host
+      readonly: false
   hostNetwork: true
   volumes:
   - hostPath:
@@ -355,6 +719,9 @@ spec:
   - hostPath:
       path: /usr/share/ca-certificates
     name: ssl-certs-host
+  - hostPath:
+      path: /etc/kubernetes/volumeplugins
+    name: volumeplugins-host
 EOF
     fi
 
@@ -376,8 +743,10 @@ spec:
     command:
     - /hyperkube
     - scheduler
+    - --address=0.0.0.0
     - --master=http://127.0.0.1:8080
     - --leader-elect=true
+    - --v=2
     resources:
       requests:
         cpu: 100m
@@ -396,7 +765,7 @@ EOF
         echo "TEMPLATE: $TEMPLATE"
         mkdir -p $(dirname $TEMPLATE)
         cat << EOF > $TEMPLATE
-apiVersion: rbac.authorization.k8s.io/v1beta1
+apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
   name: add-on-cluster-admin
@@ -411,7 +780,162 @@ subjects:
 EOF
     fi
 
-    local TEMPLATE=/srv/kubernetes/manifests/kube-dns-de.yaml
+    local TEMPLATE=/srv/kubernetes/manifests/kube-apiserver-crb.yaml
+    if [ ! -f $TEMPLATE ]; then
+        echo "TEMPLATE: $TEMPLATE"
+        mkdir -p $(dirname $TEMPLATE)
+        cat << EOF > $TEMPLATE
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: ClusterRole
+metadata:
+  annotations:
+    rbac.authorization.kubernetes.io/autoupdate: "true"
+  labels:
+    kubernetes.io/bootstrapping: rbac-defaults
+  name: system:kube-apiserver-to-kubelet
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - nodes/proxy
+      - nodes/stats
+      - nodes/log
+      - nodes/spec
+      - nodes/metrics
+    verbs:
+      - "*"
+---
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: ClusterRoleBinding
+metadata:
+  name: system:kube-apiserver
+  namespace: ""
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:kube-apiserver-to-kubelet
+subjects:
+  - apiGroup: rbac.authorization.k8s.io
+    kind: User
+    name: kubernetes
+EOF
+    fi
+
+    local TEMPLATE=/srv/kubernetes/manifests/kubelet-crb.yaml
+    if [ ! -f $TEMPLATE ]; then
+        echo "TEMPLATE: $TEMPLATE"
+        mkdir -p $(dirname $TEMPLATE)
+        cat << EOF > $TEMPLATE
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  annotations:
+    rbac.authorization.kubernetes.io/autoupdate: "true"
+  labels:
+    kubernetes.io/bootstrapping: rbac-defaults
+  name: system:node
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:node
+subjects:
+- apiGroup: rbac.authorization.k8s.io
+  kind: Group
+  name: system:nodes
+EOF
+    fi
+
+    local TEMPLATE=/srv/kubernetes/manifests/coredns-serviceaccount.yaml
+    if [ ! -f $TEMPLATE ]; then
+        echo "TEMPLATE: $TEMPLATE"
+        mkdir -p $(dirname $TEMPLATE)
+        cat << EOF > $TEMPLATE
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: coredns
+  namespace: kube-system
+  labels:
+      kubernetes.io/cluster-service: "true"
+      addonmanager.kubernetes.io/mode: Reconcile
+EOF
+    fi
+
+    local TEMPLATE=/srv/kubernetes/manifests/coredns-rbac.yaml
+    if [ ! -f $TEMPLATE ]; then
+        echo "TEMPLATE: $TEMPLATE"
+        mkdir -p $(dirname $TEMPLATE)
+        cat << EOF > $TEMPLATE
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  labels:
+    kubernetes.io/bootstrapping: rbac-defaults
+    addonmanager.kubernetes.io/mode: Reconcile
+  name: system:coredns
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - endpoints
+  - services
+  - pods
+  - namespaces
+  verbs:
+  - list
+  - watch
+  - get
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  annotations:
+    rbac.authorization.kubernetes.io/autoupdate: "true"
+  labels:
+    kubernetes.io/bootstrapping: rbac-defaults
+    addonmanager.kubernetes.io/mode: EnsureExists
+  name: system:coredns
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:coredns
+subjects:
+- kind: ServiceAccount
+  name: coredns
+  namespace: kube-system
+EOF
+    fi
+
+    local TEMPLATE=/srv/kubernetes/manifests/coredns-configmap.yaml
+    if [ ! -f $TEMPLATE ]; then
+        echo "TEMPLATE: $TEMPLATE"
+        mkdir -p $(dirname $TEMPLATE)
+        cat << EOF > $TEMPLATE
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: coredns
+  namespace: kube-system
+  labels:
+      addonmanager.kubernetes.io/mode: EnsureExists
+data:
+  Corefile: |
+    .:53 {
+        errors
+        health
+        kubernetes $DNS_DOMAIN in-addr.arpa ip6.arpa {
+            pods insecure
+            upstream
+            fallthrough in-addr.arpa ip6.arpa
+        }
+        prometheus :9153
+        proxy . /etc/resolv.conf
+        cache 30
+    }
+EOF
+    fi
+
+    local TEMPLATE=/srv/kubernetes/manifests/coredns-deployment.yaml
     if [ ! -f $TEMPLATE ]; then
         echo "TEMPLATE: $TEMPLATE"
         mkdir -p $(dirname $TEMPLATE)
@@ -419,16 +943,22 @@ EOF
 apiVersion: extensions/v1beta1
 kind: Deployment
 metadata:
-  name: kube-dns
+  name: coredns
   namespace: kube-system
   labels:
     k8s-app: kube-dns
     kubernetes.io/cluster-service: "true"
+    addonmanager.kubernetes.io/mode: Reconcile
+    kubernetes.io/name: "CoreDNS"
 spec:
+  # replicas: not specified here:
+  # 1. In order to make Addon Manager do not reconcile this replicas parameter.
+  # 2. Default is 1.
+  # 3. Will be tuned in real time if DNS horizontal auto-scaling is turned on.
   strategy:
+    type: RollingUpdate
     rollingUpdate:
-      maxSurge: 10%
-      maxUnavailable: 0
+      maxUnavailable: 1
   selector:
     matchLabels:
       k8s-app: kube-dns
@@ -436,71 +966,27 @@ spec:
     metadata:
       labels:
         k8s-app: kube-dns
-      annotations:
-        scheduler.alpha.kubernetes.io/critical-pod: ''
-        scheduler.alpha.kubernetes.io/tolerations: '[{"key":"CriticalAddonsOnly", "operator":"Exists"}]'
     spec:
+      serviceAccountName: coredns
+      tolerations:
+        - key: node-role.kubernetes.io/master
+          effect: NoSchedule
+        - key: "CriticalAddonsOnly"
+          operator: "Exists"
       containers:
-      - name: kubedns
-        image: gcr.io/google_containers/kubedns-amd64:1.9
+      - name: coredns
+        image: coredns/coredns:1.0.6
+        imagePullPolicy: IfNotPresent
         resources:
           limits:
             memory: 170Mi
           requests:
             cpu: 100m
             memory: 70Mi
-        livenessProbe:
-          httpGet:
-            path: /healthz-kubedns
-            port: 8080
-            scheme: HTTP
-          initialDelaySeconds: 60
-          timeoutSeconds: 5
-          successThreshold: 1
-          failureThreshold: 5
-        readinessProbe:
-          httpGet:
-            path: /readiness
-            port: 8081
-            scheme: HTTP
-          initialDelaySeconds: 3
-          timeoutSeconds: 5
-        args:
-        - --domain=cluster.local.
-        - --dns-port=10053
-        - --config-map=kube-dns
-        # This should be set to v=2 only after the new image (cut from 1.5) has
-        # been released, otherwise we will flood the logs.
-        - --v=2
-        env:
-        - name: PROMETHEUS_PORT
-          value: "10055"
-        ports:
-        - containerPort: 10053
-          name: dns-local
-          protocol: UDP
-        - containerPort: 10053
-          name: dns-tcp-local
-          protocol: TCP
-        - containerPort: 10055
-          name: metrics
-          protocol: TCP
-      - name: dnsmasq
-        image: gcr.io/google_containers/kube-dnsmasq-amd64:1.4
-        livenessProbe:
-          httpGet:
-            path: /healthz-dnsmasq
-            port: 8080
-            scheme: HTTP
-          initialDelaySeconds: 60
-          timeoutSeconds: 5
-          successThreshold: 1
-          failureThreshold: 5
-        args:
-        - --cache-size=1000
-        - --no-resolv
-        - --server=127.0.0.1#10053
-        - --log-facility=-
+        args: [ "-conf", "/etc/coredns/Corefile" ]
+        volumeMounts:
+        - name: config-volume
+          mountPath: /etc/coredns
         ports:
         - containerPort: 53
           name: dns
@@ -508,97 +994,27 @@ spec:
         - containerPort: 53
           name: dns-tcp
           protocol: TCP
-        # see: https://github.com/kubernetes/kubernetes/issues/29055 for details
-        resources:
-          requests:
-            cpu: 150m
-            memory: 10Mi
-      - name: dnsmasq-metrics
-        image: gcr.io/google_containers/dnsmasq-metrics-amd64:1.0
         livenessProbe:
           httpGet:
-            path: /metrics
-            port: 10054
+            path: /health
+            port: 8080
             scheme: HTTP
           initialDelaySeconds: 60
           timeoutSeconds: 5
           successThreshold: 1
           failureThreshold: 5
-        args:
-        - --v=2
-        - --logtostderr
-        ports:
-        - containerPort: 10054
-          name: metrics
-          protocol: TCP
-        resources:
-          requests:
-            memory: 10Mi
-      - name: healthz
-        image: gcr.io/google_containers/exechealthz-amd64:1.2
-        resources:
-          limits:
-            memory: 50Mi
-          requests:
-            cpu: 10m
-            memory: 50Mi
-        args:
-        - --cmd=nslookup kubernetes.default.svc.cluster.local 127.0.0.1 >/dev/null
-        - --url=/healthz-dnsmasq
-        - --cmd=nslookup kubernetes.default.svc.cluster.local 127.0.0.1:10053 >/dev/null
-        - --url=/healthz-kubedns
-        - --port=8080
-        - --quiet
-        ports:
-        - containerPort: 8080
-          protocol: TCP
       dnsPolicy: Default
-
+      volumes:
+        - name: config-volume
+          configMap:
+            name: coredns
+            items:
+            - key: Corefile
+              path: Corefile
 EOF
     fi
 
-    local TEMPLATE=/srv/kubernetes/manifests/kube-dns-autoscaler-de.yaml
-    if [ ! -f $TEMPLATE ]; then
-        echo "TEMPLATE: $TEMPLATE"
-        mkdir -p $(dirname $TEMPLATE)
-        cat << EOF > $TEMPLATE
-apiVersion: extensions/v1beta1
-kind: Deployment
-metadata:
-  name: kube-dns-autoscaler
-  namespace: kube-system
-  labels:
-    k8s-app: kube-dns-autoscaler
-    kubernetes.io/cluster-service: "true"
-spec:
-  template:
-    metadata:
-      labels:
-        k8s-app: kube-dns-autoscaler
-      annotations:
-        scheduler.alpha.kubernetes.io/critical-pod: ''
-        scheduler.alpha.kubernetes.io/tolerations: '[{"key":"CriticalAddonsOnly", "operator":"Exists"}]'
-    spec:
-      containers:
-      - name: autoscaler
-        image: gcr.io/google_containers/cluster-proportional-autoscaler-amd64:1.0.0
-        resources:
-            requests:
-                cpu: "20m"
-                memory: "10Mi"
-        command:
-          - /cluster-proportional-autoscaler
-          - --namespace=kube-system
-          - --configmap=kube-dns-autoscaler
-          - --mode=linear
-          - --target=Deployment/kube-dns
-          - --default-params={"linear":{"coresPerReplica":256,"nodesPerReplica":16,"min":1}}
-          - --logtostderr=true
-          - --v=2
-EOF
-    fi
-
-    local TEMPLATE=/srv/kubernetes/manifests/kube-dns-svc.yaml
+    local TEMPLATE=/srv/kubernetes/manifests/coredns-service.yaml
     if [ ! -f $TEMPLATE ]; then
         echo "TEMPLATE: $TEMPLATE"
         mkdir -p $(dirname $TEMPLATE)
@@ -611,7 +1027,8 @@ metadata:
   labels:
     k8s-app: kube-dns
     kubernetes.io/cluster-service: "true"
-    kubernetes.io/name: "KubeDNS"
+    addonmanager.kubernetes.io/mode: Reconcile
+    kubernetes.io/name: "CoreDNS"
 spec:
   selector:
     k8s-app: kube-dns
@@ -626,7 +1043,117 @@ spec:
 EOF
     fi
 
-    local TEMPLATE=/srv/kubernetes/manifests/heapster-de.yaml
+    local TEMPLATE=/srv/kubernetes/manifests/kube-dns-autoscaler-deployment.yaml
+    if [ ! -f $TEMPLATE ]; then
+        echo "TEMPLATE: $TEMPLATE"
+        mkdir -p $(dirname $TEMPLATE)
+        cat << EOF > $TEMPLATE
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kube-dns-autoscaler
+  namespace: kube-system
+  labels:
+    k8s-app: kube-dns-autoscaler
+    kubernetes.io/cluster-service: "true"
+    addonmanager.kubernetes.io/mode: Reconcile
+spec:
+  selector:
+    matchLabels:
+      k8s-app: kube-dns-autoscaler
+  template:
+    metadata:
+      labels:
+        k8s-app: kube-dns-autoscaler
+      annotations:
+        scheduler.alpha.kubernetes.io/critical-pod: ''
+    spec:
+      priorityClassName: system-cluster-critical
+      containers:
+      - name: autoscaler
+        image: k8s.gcr.io/cluster-proportional-autoscaler-amd64:1.1.2-r2
+        resources:
+            requests:
+                cpu: "20m"
+                memory: "10Mi"
+        command:
+          - /cluster-proportional-autoscaler
+          - --namespace=kube-system
+          - --configmap=kube-dns-autoscaler
+          # Should keep target in sync with cluster/addons/dns/kube-dns.yaml.base
+          - --target=Deployment/kube-dns
+          # When cluster is using large nodes(with more cores), "coresPerReplica" should dominate.
+          # If using small nodes, "nodesPerReplica" should dominate.
+          - --default-params={"linear":{"coresPerReplica":256,"nodesPerReplica":16,"preventSinglePointFailure":true}}
+          - --logtostderr=true
+          - --v=2
+      tolerations:
+      - key: "CriticalAddonsOnly"
+        operator: "Exists"
+      serviceAccountName: kube-dns-autoscaler
+EOF
+    fi
+
+    local TEMPLATE=/srv/kubernetes/manifests/kube-dns-autoscaler-serviceaccount.yaml
+    if [ ! -f $TEMPLATE ]; then
+        echo "TEMPLATE: $TEMPLATE"
+        mkdir -p $(dirname $TEMPLATE)
+        cat << EOF > $TEMPLATE
+kind: ServiceAccount
+apiVersion: v1
+metadata:
+  name: kube-dns-autoscaler
+  namespace: kube-system
+  labels:
+    addonmanager.kubernetes.io/mode: Reconcile
+EOF
+    fi
+
+    local TEMPLATE=/srv/kubernetes/manifests/kube-dns-autoscaler-rbac.yaml
+    if [ ! -f $TEMPLATE ]; then
+        echo "TEMPLATE: $TEMPLATE"
+        mkdir -p $(dirname $TEMPLATE)
+        cat << EOF > $TEMPLATE
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: system:kube-dns-autoscaler
+  labels:
+    addonmanager.kubernetes.io/mode: Reconcile
+rules:
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["list"]
+  - apiGroups: [""]
+    resources: ["replicationcontrollers/scale"]
+    verbs: ["get", "update"]
+  - apiGroups: ["extensions"]
+    resources: ["deployments/scale", "replicasets/scale"]
+    verbs: ["get", "update"]
+# Remove the configmaps rule once below issue is fixed:
+# kubernetes-incubator/cluster-proportional-autoscaler#16
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "create"]
+---
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: system:kube-dns-autoscaler
+  labels:
+    addonmanager.kubernetes.io/mode: Reconcile
+subjects:
+  - kind: ServiceAccount
+    name: kube-dns-autoscaler
+    namespace: kube-system
+roleRef:
+  kind: ClusterRole
+  name: system:kube-dns-autoscaler
+  apiGroup: rbac.authorization.k8s.io
+EOF
+    fi
+
+    local TEMPLATE=/srv/kubernetes/manifests/heapster-deployment.yaml
     if [ ! -f $TEMPLATE ]; then
         echo "TEMPLATE: $TEMPLATE"
         mkdir -p $(dirname $TEMPLATE)
@@ -634,29 +1161,30 @@ EOF
 apiVersion: extensions/v1beta1
 kind: Deployment
 metadata:
-  name: heapster-v1.2.0
+  name: heapster-v1.5.3
   namespace: kube-system
   labels:
     k8s-app: heapster
     kubernetes.io/cluster-service: "true"
-    version: v1.2.0
+    addonmanager.kubernetes.io/mode: Reconcile
+    version: v1.5.3
 spec:
   replicas: 1
   selector:
     matchLabels:
       k8s-app: heapster
-      version: v1.2.0
+      version: v1.5.3
   template:
     metadata:
       labels:
         k8s-app: heapster
-        version: v1.2.0
+        version: v1.5.3
       annotations:
         scheduler.alpha.kubernetes.io/critical-pod: ''
-        scheduler.alpha.kubernetes.io/tolerations: '[{"key":"CriticalAddonsOnly", "operator":"Exists"}]'
     spec:
+      priorityClassName: system-cluster-critical
       containers:
-        - image: gcr.io/google_containers/heapster:v1.2.0
+        - image: k8s.gcr.io/heapster-amd64:v1.5.3
           name: heapster
           livenessProbe:
             httpGet:
@@ -668,7 +1196,14 @@ spec:
           command:
             - /heapster
             - --source=kubernetes.summary_api:''
-        - image: gcr.io/google_containers/addon-resizer:1.6
+            - --sink=influxdb:http://monitoring-influxdb:8086
+        - image: k8s.gcr.io/heapster-amd64:v1.5.3
+          name: eventer
+          command:
+            - /eventer
+            - --source=kubernetes:''
+            - --sink=influxdb:http://monitoring-influxdb:8086
+        - image: k8s.gcr.io/addon-resizer:1.8.1
           name: heapster-nanny
           resources:
             limits:
@@ -686,21 +1221,69 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.namespace
+          volumeMounts:
+          - name: heapster-config-volume
+            mountPath: /etc/config
           command:
             - /pod_nanny
+            - --config-dir=/etc/config
             - --cpu=80m
-            - --extra-cpu=4m
+            - --extra-cpu=20m
             - --memory=200Mi
             - --extra-memory=4Mi
             - --threshold=5
-            - --deployment=heapster-v1.2.0
+            - --deployment=heapster-v1.5.3
             - --container=heapster
             - --poll-period=300000
             - --estimator=exponential
+        - image: k8s.gcr.io/addon-resizer:1.8.1
+          name: eventer-nanny
+          resources:
+            limits:
+              cpu: 50m
+              memory: 200Mi
+            requests:
+              cpu: 50m
+              memory: 200Mi
+          env:
+            - name: MY_POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: MY_POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          volumeMounts:
+          - name: eventer-config-volume
+            mountPath: /etc/config
+          command:
+            - /pod_nanny
+            - --config-dir=/etc/config
+            - --cpu=100m
+            - --extra-cpu=0m
+            - --memory=190Mi
+            - --extra-memory=50Mi
+            - --threshold=5
+            - --deployment=heapster-v1.5.3
+            - --container=eventer
+            - --poll-period=300000
+            - --estimator=exponential
+      volumes:
+        - name: heapster-config-volume
+          configMap:
+            name: heapster-config
+        - name: eventer-config-volume
+          configMap:
+            name: eventer-config
+      serviceAccountName: heapster
+      tolerations:
+        - key: "CriticalAddonsOnly"
+          operator: "Exists"
 EOF
     fi
 
-    local TEMPLATE=/srv/kubernetes/manifests/heapster-svc.yaml
+    local TEMPLATE=/srv/kubernetes/manifests/heapster-service.yaml
     if [ ! -f $TEMPLATE ]; then
         echo "TEMPLATE: $TEMPLATE"
         mkdir -p $(dirname $TEMPLATE)
@@ -712,22 +1295,240 @@ metadata:
   namespace: kube-system
   labels:
     kubernetes.io/cluster-service: "true"
+    addonmanager.kubernetes.io/mode: Reconcile
     kubernetes.io/name: "Heapster"
-spec:
-  ports:
+spec: 
+  ports: 
     - port: 80
       targetPort: 8082
-  selector:
+  selector: 
     k8s-app: heapster
 EOF
     fi
 
-    local TEMPLATE=/srv/kubernetes/manifests/kube-dashboard-de.yaml
+    local TEMPLATE=/srv/kubernetes/manifests/heapster-serviceaccount.yaml
     if [ ! -f $TEMPLATE ]; then
         echo "TEMPLATE: $TEMPLATE"
         mkdir -p $(dirname $TEMPLATE)
         cat << EOF > $TEMPLATE
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: heapster
+  namespace: kube-system
+  labels:
+    kubernetes.io/cluster-service: "true"
+    addonmanager.kubernetes.io/mode: Reconcile
+EOF
+    fi
+
+    local TEMPLATE=/srv/kubernetes/manifests/heapster-configmap.yaml
+    if [ ! -f $TEMPLATE ]; then
+        echo "TEMPLATE: $TEMPLATE"
+        mkdir -p $(dirname $TEMPLATE)
+        cat << EOF > $TEMPLATE
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: heapster-config
+  namespace: kube-system
+  labels:
+    kubernetes.io/cluster-service: "true"
+    addonmanager.kubernetes.io/mode: EnsureExists
+data:
+  NannyConfiguration: |-
+    apiVersion: nannyconfig/v1alpha1
+    kind: NannyConfiguration
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: eventer-config
+  namespace: kube-system
+  labels:
+    kubernetes.io/cluster-service: "true"
+    addonmanager.kubernetes.io/mode: EnsureExists
+data:
+  NannyConfiguration: |-
+    apiVersion: nannyconfig/v1alpha1
+    kind: NannyConfiguration
+EOF
+    fi
+
+    local TEMPLATE=/srv/kubernetes/manifests/heapster-rbac.yaml
+    if [ ! -f $TEMPLATE ]; then
+        echo "TEMPLATE: $TEMPLATE"
+        mkdir -p $(dirname $TEMPLATE)
+        cat << EOF > $TEMPLATE
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1beta1
+metadata:
+  name: heapster
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:heapster
+subjects:
+- kind: ServiceAccount
+  name: heapster
+  namespace: kube-system
+EOF
+    fi
+
+    local TEMPLATE=/srv/kubernetes/manifests/heapster-influxdb-grafana-deployment.yaml
+    if [ ! -f $TEMPLATE ]; then
+        echo "TEMPLATE: $TEMPLATE"
+        mkdir -p $(dirname $TEMPLATE)
+        cat << EOF > $TEMPLATE
+kind: Deployment
 apiVersion: extensions/v1beta1
+metadata:
+  name: monitoring-influxdb-grafana-v4
+  namespace: kube-system
+  labels:
+    k8s-app: influxGrafana
+    version: v4
+    kubernetes.io/cluster-service: "true"
+    addonmanager.kubernetes.io/mode: Reconcile
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      k8s-app: influxGrafana
+      version: v4
+  template:
+    metadata:
+      labels:
+        k8s-app: influxGrafana
+        version: v4
+      annotations:
+        scheduler.alpha.kubernetes.io/critical-pod: ''
+    spec:
+      priorityClassName: system-cluster-critical
+      tolerations:
+      - key: node-role.kubernetes.io/master
+        effect: NoSchedule
+      - key: "CriticalAddonsOnly"
+        operator: "Exists"
+      containers:
+        - name: influxdb
+          image: k8s.gcr.io/heapster-influxdb-amd64:v1.3.3
+          resources:
+            limits:
+              cpu: 100m
+              memory: 500Mi
+            requests:
+              cpu: 100m
+              memory: 500Mi
+          ports:
+            - name: http
+              containerPort: 8083
+            - name: api
+              containerPort: 8086
+          volumeMounts:
+          - name: influxdb-persistent-storage
+            mountPath: /data
+        - name: grafana
+          image: k8s.gcr.io/heapster-grafana-amd64:v4.4.3
+          env:
+          resources:
+            # keep request = limit to keep this container in guaranteed class
+            limits:
+              cpu: 100m
+              memory: 100Mi
+            requests:
+              cpu: 100m
+              memory: 100Mi
+          env:
+            # This variable is required to setup templates in Grafana.
+            - name: INFLUXDB_SERVICE_URL
+              value: http://monitoring-influxdb:8086
+              # The following env variables are required to make Grafana accessible via
+              # the kubernetes api-server proxy. On production clusters, we recommend
+              # removing these env variables, setup auth for grafana, and expose the grafana
+              # service using a LoadBalancer or a public IP.
+            - name: GF_AUTH_BASIC_ENABLED
+              value: "false"
+            - name: GF_AUTH_ANONYMOUS_ENABLED
+              value: "true"
+            - name: GF_AUTH_ANONYMOUS_ORG_ROLE
+              value: Admin
+            - name: GF_SERVER_ROOT_URL
+              value: /api/v1/namespaces/kube-system/services/monitoring-grafana/proxy/
+          ports:
+          - name: ui
+            containerPort: 3000
+          volumeMounts:
+          - name: grafana-persistent-storage
+            mountPath: /var
+      volumes:
+      - name: influxdb-persistent-storage
+        emptyDir: {}
+      - name: grafana-persistent-storage
+        emptyDir: {}
+EOF
+    fi
+
+    local TEMPLATE=/srv/kubernetes/manifests/heapster-influxdb-service.yaml
+    if [ ! -f $TEMPLATE ]; then
+        echo "TEMPLATE: $TEMPLATE"
+        mkdir -p $(dirname $TEMPLATE)
+        cat << EOF > $TEMPLATE
+apiVersion: v1
+kind: Service
+metadata:
+  name: monitoring-influxdb
+  namespace: kube-system
+  labels:
+    kubernetes.io/cluster-service: "true"
+    addonmanager.kubernetes.io/mode: Reconcile
+    kubernetes.io/name: "InfluxDB"
+spec:
+  ports:
+    - name: http
+      port: 8083
+      targetPort: 8083
+    - name: api
+      port: 8086
+      targetPort: 8086
+  selector:
+    k8s-app: influxGrafana
+EOF
+    fi
+
+    local TEMPLATE=/srv/kubernetes/manifests/heapster-grafana-service.yaml
+    if [ ! -f $TEMPLATE ]; then
+        echo "TEMPLATE: $TEMPLATE"
+        mkdir -p $(dirname $TEMPLATE)
+        cat << EOF > $TEMPLATE
+apiVersion: v1
+kind: Service
+metadata:
+  name: monitoring-grafana
+  namespace: kube-system
+  labels:
+    kubernetes.io/cluster-service: "true"
+    addonmanager.kubernetes.io/mode: Reconcile
+    kubernetes.io/name: "Grafana"
+spec:
+  # On production clusters, consider setting up auth for grafana, and
+  # exposing Grafana either using a LoadBalancer or a public IP.
+  # type: LoadBalancer
+  ports:
+    - port: 80
+      protocol: TCP
+      targetPort: ui
+  selector:
+    k8s-app: influxGrafana
+EOF
+    fi
+
+    local TEMPLATE=/srv/kubernetes/manifests/kube-dashboard-deployment.yaml
+    if [ ! -f $TEMPLATE ]; then
+        echo "TEMPLATE: $TEMPLATE"
+        mkdir -p $(dirname $TEMPLATE)
+        cat << EOF > $TEMPLATE
+apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: kubernetes-dashboard
@@ -735,6 +1536,7 @@ metadata:
   labels:
     k8s-app: kubernetes-dashboard
     kubernetes.io/cluster-service: "true"
+    addonmanager.kubernetes.io/mode: Reconcile
 spec:
   selector:
     matchLabels:
@@ -745,31 +1547,52 @@ spec:
         k8s-app: kubernetes-dashboard
       annotations:
         scheduler.alpha.kubernetes.io/critical-pod: ''
-        scheduler.alpha.kubernetes.io/tolerations: '[{"key":"CriticalAddonsOnly", "operator":"Exists"}]'
     spec:
+      priorityClassName: system-cluster-critical
       containers:
       - name: kubernetes-dashboard
-        image: gcr.io/google_containers/kubernetes-dashboard-amd64:v1.5.0
+        image: k8s.gcr.io/kubernetes-dashboard-amd64:v1.8.3
         resources:
-          # keep request = limit to keep this container in guaranteed class
           limits:
             cpu: 100m
-            memory: 50Mi
+            memory: 300Mi
           requests:
-            cpu: 100m
-            memory: 50Mi
+            cpu: 50m
+            memory: 100Mi
         ports:
-        - containerPort: 9090
+        - containerPort: 8443
+          protocol: TCP
+        args:
+          # PLATFORM-SPECIFIC ARGS HERE
+          # - --auto-generate-certificates
+          - --tls-key-file=dashboard.key
+          - --tls-cert-file=dashboard.crt
+        volumeMounts:
+        - name: kubernetes-dashboard-certs
+          mountPath: /certs
+        - name: tmp-volume
+          mountPath: /tmp
         livenessProbe:
           httpGet:
+            scheme: HTTPS
             path: /
-            port: 9090
+            port: 8443
           initialDelaySeconds: 30
           timeoutSeconds: 30
+      volumes:
+      - name: kubernetes-dashboard-certs
+        secret:
+          secretName: kubernetes-dashboard-certs
+      - name: tmp-volume
+        emptyDir: {}
+      serviceAccountName: kubernetes-dashboard
+      tolerations:
+      - key: "CriticalAddonsOnly"
+        operator: "Exists"
 EOF
     fi
 
-    local TEMPLATE=/srv/kubernetes/manifests/kube-dashboard-svc.yaml
+    local TEMPLATE=/srv/kubernetes/manifests/kube-dashboard-service.yaml
     if [ ! -f $TEMPLATE ]; then
         echo "TEMPLATE: $TEMPLATE"
         mkdir -p $(dirname $TEMPLATE)
@@ -782,70 +1605,128 @@ metadata:
   labels:
     k8s-app: kubernetes-dashboard
     kubernetes.io/cluster-service: "true"
+    addonmanager.kubernetes.io/mode: Reconcile
 spec:
   selector:
     k8s-app: kubernetes-dashboard
   ports:
-  - port: 80
-    targetPort: 9090
+  - port: 443
+    targetPort: 8443
 EOF
     fi
 
-    local TEMPLATE=/etc/flannel/options.env
+    local TEMPLATE=/srv/kubernetes/manifests/kube-dashboard-secret.yaml
     if [ ! -f $TEMPLATE ]; then
         echo "TEMPLATE: $TEMPLATE"
         mkdir -p $(dirname $TEMPLATE)
         cat << EOF > $TEMPLATE
-FLANNELD_IFACE=$ADVERTISE_IP
-FLANNELD_ETCD_ENDPOINTS=$ETCD_ENDPOINTS
+apiVersion: v1
+kind: Secret
+metadata:
+  labels:
+    k8s-app: kubernetes-dashboard
+    # Allows editing resource and makes sure it is created first.
+    addonmanager.kubernetes.io/mode: EnsureExists
+  name: kubernetes-dashboard-certs
+  namespace: kube-system
+type: Opaque
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  labels:
+    k8s-app: kubernetes-dashboard
+    # Allows editing resource and makes sure it is created first.
+    addonmanager.kubernetes.io/mode: EnsureExists
+  name: kubernetes-dashboard-key-holder
+  namespace: kube-system
+type: Opaque
 EOF
     fi
 
-    local TEMPLATE=/etc/systemd/system/flanneld.service.d/40-ExecStartPre-symlink.conf.conf
+local TEMPLATE=/srv/kubernetes/manifests/kube-dashboard-serviceaccount.yaml
     if [ ! -f $TEMPLATE ]; then
         echo "TEMPLATE: $TEMPLATE"
         mkdir -p $(dirname $TEMPLATE)
         cat << EOF > $TEMPLATE
-[Service]
-ExecStartPre=/usr/bin/ln -sf /etc/flannel/options.env /run/flannel/options.env
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  labels:
+    k8s-app: kubernetes-dashboard
+    addonmanager.kubernetes.io/mode: Reconcile
+  name: kubernetes-dashboard
+  namespace: kube-system
 EOF
     fi
 
-    local TEMPLATE=/etc/systemd/system/docker.service.d/40-flannel.conf
+local TEMPLATE=/srv/kubernetes/manifests/kube-dashboard-rbac.yaml
     if [ ! -f $TEMPLATE ]; then
         echo "TEMPLATE: $TEMPLATE"
         mkdir -p $(dirname $TEMPLATE)
         cat << EOF > $TEMPLATE
-[Unit]
-Requires=flanneld.service
-After=flanneld.service
-[Service]
-EnvironmentFile=/etc/kubernetes/cni/docker_opts_cni.env
+kind: Role
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  labels:
+    k8s-app: kubernetes-dashboard
+    addonmanager.kubernetes.io/mode: Reconcile
+  name: kubernetes-dashboard-minimal
+  namespace: kube-system
+rules:
+  # Allow Dashboard to get, update and delete Dashboard exclusive secrets.
+- apiGroups: [""]
+  resources: ["secrets"]
+  resourceNames: ["kubernetes-dashboard-key-holder", "kubernetes-dashboard-certs"]
+  verbs: ["get", "update", "delete"]
+  # Allow Dashboard to get and update 'kubernetes-dashboard-settings' config map.
+- apiGroups: [""]
+  resources: ["configmaps"]
+  resourceNames: ["kubernetes-dashboard-settings"]
+  verbs: ["get", "update"]
+  # Allow Dashboard to get metrics from heapster.
+- apiGroups: [""]
+  resources: ["services"]
+  resourceNames: ["heapster"]
+  verbs: ["proxy"]
+- apiGroups: [""]
+  resources: ["services/proxy"]
+  resourceNames: ["heapster", "http:heapster:", "https:heapster:"]
+  verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kubernetes-dashboard-minimal
+  namespace: kube-system
+  labels:
+    k8s-app: kubernetes-dashboard
+    addonmanager.kubernetes.io/mode: Reconcile
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: kubernetes-dashboard-minimal
+subjects:
+- kind: ServiceAccount
+  name: kubernetes-dashboard
+  namespace: kube-system
 EOF
     fi
 
-    local TEMPLATE=/etc/kubernetes/cni/docker_opts_cni.env
+local TEMPLATE=/srv/kubernetes/manifests/kube-dashboard-configmap.yaml
     if [ ! -f $TEMPLATE ]; then
         echo "TEMPLATE: $TEMPLATE"
         mkdir -p $(dirname $TEMPLATE)
         cat << EOF > $TEMPLATE
-DOCKER_OPT_BIP=""
-DOCKER_OPT_IPMASQ=""
-EOF
-    fi
-
-    local TEMPLATE=/etc/kubernetes/cni/net.d/10-flannel.conf
-    if [ "${USE_CALICO}" = "false" ] && [ ! -f "${TEMPLATE}" ]; then
-        echo "TEMPLATE: $TEMPLATE"
-        mkdir -p $(dirname $TEMPLATE)
-        cat << EOF > $TEMPLATE
-{
-    "name": "podnet",
-    "type": "flannel",
-    "delegate": {
-        "isDefaultGateway": true
-    }
-}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  labels:
+    k8s-app: kubernetes-dashboard
+    # Allows editing resource and makes sure it is created first.
+    addonmanager.kubernetes.io/mode: EnsureExists
+  name: kubernetes-dashboard-settings
+  namespace: kube-system
 EOF
     fi
 
@@ -854,41 +1735,148 @@ EOF
     echo "TEMPLATE: $TEMPLATE"
     mkdir -p $(dirname $TEMPLATE)
     cat << EOF > $TEMPLATE
+# Calico Version v3.0.3
+# https://docs.projectcalico.org/v3.0/releases#v3.0.3
+# This manifest includes the following component versions:
+#   calico/node:v3.0.3
+#   calico/cni:v2.0.1
+#   calico/kube-controllers:v2.0.1
+
 # This ConfigMap is used to configure a self-hosted Calico installation.
 kind: ConfigMap
 apiVersion: v1
 metadata:
-  name: calico-config 
+  name: calico-config
   namespace: kube-system
 data:
-  # Configure this with the location of your etcd cluster.
+  # The location of your etcd cluster.  This uses the Service clusterIP
+  # defined below.
   etcd_endpoints: "${ETCD_ENDPOINTS}"
 
-  # The CNI network configuration to install on each node.  The special
-  # values in this config will be automatically populated.
+  # Configure the Calico backend to use.
+  calico_backend: "bird"
+
+  # The CNI network configuration to install on each node.
   cni_network_config: |-
     {
-        "name": "calico",
-        "type": "flannel",
-        "delegate": {
+      "name": "k8s-pod-network",
+      "cniVersion": "0.3.0",
+      "plugins": [
+        {
           "type": "calico",
           "etcd_endpoints": "__ETCD_ENDPOINTS__",
           "log_level": "info",
+          "mtu": 1500,
+          "ipam": {
+              "type": "calico-ipam"
+          },
           "policy": {
               "type": "k8s",
-              "k8s_api_root": "https://__KUBERNETES_SERVICE_HOST__:__KUBERNETES_SERVICE_PORT__",
-              "k8s_auth_token": "__SERVICEACCOUNT_TOKEN__"
+               "k8s_api_root": "https://__KUBERNETES_SERVICE_HOST__:__KUBERNETES_SERVICE_PORT__",
+               "k8s_auth_token": "__SERVICEACCOUNT_TOKEN__"
           },
           "kubernetes": {
-              "kubeconfig": "/etc/kubernetes/cni/net.d/__KUBECONFIG_FILENAME__"
+              "kubeconfig": "/etc/cni/net.d/__KUBECONFIG_FILENAME__"
           }
+        },
+        {
+          "type": "portmap",
+          "snat": true,
+          "capabilities": {"portMappings": true}
         }
+      ]
     }
+
+
+---
+
+# This manifest installs the Calico etcd on the kubeadm master.  This uses a DaemonSet
+# to force it to run on the master even when the master isn't schedulable, and uses
+# nodeSelector to ensure it only runs on the master.
+apiVersion: extensions/v1beta1
+kind: DaemonSet
+metadata:
+  name: calico-etcd
+  namespace: kube-system
+  labels:
+    k8s-app: calico-etcd
+spec:
+  template:
+    metadata:
+      labels:
+        k8s-app: calico-etcd
+      annotations:
+        # Mark this pod as a critical add-on; when enabled, the critical add-on scheduler
+        # reserves resources for critical add-on pods so that they can be rescheduled after
+        # a failure.  This annotation works in tandem with the toleration below.
+        scheduler.alpha.kubernetes.io/critical-pod: ''
+    spec:
+      # Only run this pod on the master.
+      tolerations:
+      # this taint is set by all kubelets running `--cloud-provider=external`
+      # so we should tolerate it to schedule the calico pods
+      - key: node.cloudprovider.kubernetes.io/uninitialized
+        value: "true"
+        effect: NoSchedule
+      - key: node-role.kubernetes.io/master
+        effect: NoSchedule
+      # Allow this pod to be rescheduled while the node is in "critical add-ons only" mode.
+      # This, along with the annotation above marks this pod as a critical add-on.
+      - key: CriticalAddonsOnly
+        operator: Exists
+      nodeSelector:
+        node-role.kubernetes.io/master: ""
+      hostNetwork: true
+      containers:
+        - name: calico-etcd
+          image: quay.io/coreos/etcd:v3.1.10
+          env:
+            - name: CALICO_ETCD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+          command:
+          - /usr/local/bin/etcd
+          args:
+          - --name=calico
+          - --data-dir=/var/etcd/calico-data
+          - --advertise-client-urls=http://$CALICO_ETCD_IP:6666
+          - --listen-client-urls=http://0.0.0.0:6666
+          - --listen-peer-urls=http://0.0.0.0:6667
+          - --auto-compaction-retention=1
+          volumeMounts:
+            - name: var-etcd
+              mountPath: /var/etcd
+      volumes:
+        - name: var-etcd
+          hostPath:
+            path: /var/etcd
+
+---
+
+# This manifest installs the Service which gets traffic to the Calico
+# etcd.
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    k8s-app: calico-etcd
+  name: calico-etcd
+  namespace: kube-system
+spec:
+  # Select the calico-etcd pod running on the master.
+  selector:
+    k8s-app: calico-etcd
+  # This ClusterIP needs to be known in advance, since we cannot rely
+  # on DNS to get access to etcd.
+  clusterIP: ${CLUSTER_IP}
+  ports:
+    - port: 6666
 
 ---
 
 # This manifest installs the calico/node container, as well
-# as the Calico CNI plugins and network config on 
+# as the Calico CNI plugins and network config on
 # each master and worker node in a Kubernetes cluster.
 kind: DaemonSet
 apiVersion: extensions/v1beta1
@@ -901,23 +1889,43 @@ spec:
   selector:
     matchLabels:
       k8s-app: calico-node
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
   template:
     metadata:
       labels:
         k8s-app: calico-node
       annotations:
+        # Mark this pod as a critical add-on; when enabled, the critical add-on scheduler
+        # reserves resources for critical add-on pods so that they can be rescheduled after
+        # a failure.  This annotation works in tandem with the toleration below.
         scheduler.alpha.kubernetes.io/critical-pod: ''
-        scheduler.alpha.kubernetes.io/tolerations: |
-          [{"key": "dedicated", "value": "master", "effect": "NoSchedule" },
-           {"key":"CriticalAddonsOnly", "operator":"Exists"}]
     spec:
       hostNetwork: true
+      tolerations:
+      # this taint is set by all kubelets running `--cloud-provider=external`
+      # so we should tolerate it to schedule the calico pods
+      - key: node.cloudprovider.kubernetes.io/uninitialized
+        value: "true"
+        effect: NoSchedule
+      - key: node-role.kubernetes.io/master
+        effect: NoSchedule
+      # Allow this pod to be rescheduled while the node is in "critical add-ons only" mode.
+      # This, along with the annotation above marks this pod as a critical add-on.
+      - key: CriticalAddonsOnly
+        operator: Exists
+      serviceAccountName: calico-cni-plugin
+      # Minimize downtime during a rolling upgrade or deletion; tell Kubernetes to do a "force
+      # deletion": https://kubernetes.io/docs/concepts/workloads/pods/pod/#termination-of-pods.
+      terminationGracePeriodSeconds: 0
       containers:
-        # Runs calico/node container on each Kubernetes node.  This 
+        # Runs calico/node container on each Kubernetes node.  This
         # container programs network policy and routes on each
         # host.
         - name: calico-node
-          image: quay.io/calico/node:v1.2.0
+          image: quay.io/calico/node:v3.0.3
           env:
             # The location of the Calico etcd cluster.
             - name: ETCD_ENDPOINTS
@@ -925,38 +1933,80 @@ spec:
                 configMapKeyRef:
                   name: calico-config
                   key: etcd_endpoints
-            # Choose the backend to use. 
+            # Enable BGP.  Disable to enforce policy only.
             - name: CALICO_NETWORKING_BACKEND
-              value: "none"
-            # Disable file logging so 'kubectl logs' works.
+              valueFrom:
+                configMapKeyRef:
+                  name: calico-config
+                  key: calico_backend
+            # Cluster type to identify the deployment type
+            - name: CLUSTER_TYPE
+              value: "kubeadm,bgp"
+            # Disable file logging so `kubectl logs` works.
             - name: CALICO_DISABLE_FILE_LOGGING
               value: "true"
-            - name: NO_DEFAULT_POOLS
+            # Set noderef for node controller.
+            - name: CALICO_K8S_NODE_REF
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            # Set Felix endpoint to host default action to ACCEPT.
+            - name: FELIX_DEFAULTENDPOINTTOHOSTACTION
+              value: "ACCEPT"
+            # The default IPv4 pool to create on startup if none exists. Pod IPs will be
+            # chosen from this range. Changing this value after installation will have
+            # no effect. This should fall within `--cluster-cidr`.
+            - name: CALICO_IPV4POOL_CIDR
+              value: "192.168.0.0/16"
+            - name: CALICO_IPV4POOL_IPIP
+              value: "Always"
+            # Disable IPv6 on Kubernetes.
+            - name: FELIX_IPV6SUPPORT
+              value: "false"
+            # Set MTU for tunnel device used if ipip is enabled
+            - name: FELIX_IPINIPMTU
+              value: "1440"
+            # Set Felix logging to "info"
+            - name: FELIX_LOGSEVERITYSCREEN
+              value: "info"
+            # Auto-detect the BGP IP address.
+            - name: IP
+              value: "autodetect"
+            - name: FELIX_HEALTHENABLED
               value: "true"
-            - name: IP_AUTODETECTION_METHOD
-              value: "can-reach=172.17.4.101"
           securityContext:
             privileged: true
+          resources:
+            requests:
+              cpu: 250m
+          livenessProbe:
+            httpGet:
+              path: /liveness
+              port: 9099
+            periodSeconds: 10
+            initialDelaySeconds: 10
+            failureThreshold: 6
+          readinessProbe:
+            httpGet:
+              path: /readiness
+              port: 9099
+            periodSeconds: 10
           volumeMounts:
             - mountPath: /lib/modules
               name: lib-modules
-              readOnly: false
+              readOnly: true
             - mountPath: /var/run/calico
               name: var-run-calico
               readOnly: false
-            - mountPath: /etc/resolv.conf
-              name: dns
-              readOnly: true
         # This container installs the Calico CNI binaries
         # and CNI network config file on each node.
         - name: install-cni
-          image: quay.io/calico/cni:v1.5.2
-          imagePullPolicy: Always
+          image: quay.io/calico/cni:v2.0.1
           command: ["/install-cni.sh"]
           env:
-            # CNI configuration filename
+            # Name of the CNI config file to create.
             - name: CNI_CONF_NAME
-              value: "10-calico.conf"
+              value: "10-calico.conflist"
             # The location of the Calico etcd cluster.
             - name: ETCD_ENDPOINTS
               valueFrom:
@@ -988,43 +2038,55 @@ spec:
             path: /opt/cni/bin
         - name: cni-net-dir
           hostPath:
-            path: /etc/kubernetes/cni/net.d
-        - name: dns
-          hostPath:
-            path: /etc/resolv.conf
+            path: /etc/cni/net.d
 
 ---
 
-# This manifest deploys the Calico policy controller on Kubernetes.
-# See https://github.com/projectcalico/k8s-policy
+# This manifest deploys the Calico Kubernetes controllers.
+# See https://github.com/projectcalico/kube-controllers
 apiVersion: extensions/v1beta1
-kind: ReplicaSet 
+kind: Deployment
 metadata:
-  name: calico-policy-controller
+  name: calico-kube-controllers
   namespace: kube-system
   labels:
-    k8s-app: calico-policy
+    k8s-app: calico-kube-controllers
 spec:
-  # The policy controller can only have a single active instance.
+  # The controllers can only have a single active instance.
   replicas: 1
+  strategy:
+    type: Recreate
   template:
     metadata:
-      name: calico-policy-controller
+      name: calico-kube-controllers
       namespace: kube-system
       labels:
-        k8s-app: calico-policy
+        k8s-app: calico-kube-controllers
       annotations:
+        # Mark this pod as a critical add-on; when enabled, the critical add-on scheduler
+        # reserves resources for critical add-on pods so that they can be rescheduled after
+        # a failure.  This annotation works in tandem with the toleration below.
         scheduler.alpha.kubernetes.io/critical-pod: ''
-        scheduler.alpha.kubernetes.io/tolerations: |
-          [{"key": "dedicated", "value": "master", "effect": "NoSchedule" },
-           {"key":"CriticalAddonsOnly", "operator":"Exists"}]
     spec:
-      # The policy controller must run in the host network namespace so that
+      # The controllers must run in the host network namespace so that
       # it isn't governed by policy that would prevent it from working.
       hostNetwork: true
+      tolerations:
+      # this taint is set by all kubelets running `--cloud-provider=external`
+      # so we should tolerate it to schedule the calico pods
+      - key: node.cloudprovider.kubernetes.io/uninitialized
+        value: "true"
+        effect: NoSchedule
+      - key: node-role.kubernetes.io/master
+        effect: NoSchedule
+      # Allow this pod to be rescheduled while the node is in "critical add-ons only" mode.
+      # This, along with the annotation above marks this pod as a critical add-on.
+      - key: CriticalAddonsOnly
+        operator: Exists
+      serviceAccountName: calico-kube-controllers
       containers:
-        - name: calico-policy-controller
-          image: calico/kube-policy-controller:v0.4.0
+        - name: calico-kube-controllers
+          image: quay.io/calico/kube-controllers:v2.0.1
           env:
             # The location of the Calico etcd cluster.
             - name: ETCD_ENDPOINTS
@@ -1032,15 +2094,248 @@ spec:
                 configMapKeyRef:
                   name: calico-config
                   key: etcd_endpoints
-            # The location of the Kubernetes API.  Use the default Kubernetes
-            # service for API access.
-            - name: K8S_API
-              value: "https://kubernetes.default:443"
-            # Since we're running in the host namespace and might not have KubeDNS 
-            # access, configure the container's /etc/hosts to resolve
-            # kubernetes.default to the correct service clusterIP.
-            - name: CONFIGURE_ETC_HOSTS
-              value: "true"
+            # Choose which controllers to run.
+            - name: ENABLED_CONTROLLERS
+              value: policy,profile,workloadendpoint,node
+
+---
+
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: ClusterRoleBinding
+metadata:
+  name: calico-cni-plugin
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: calico-cni-plugin
+subjects:
+- kind: ServiceAccount
+  name: calico-cni-plugin
+  namespace: kube-system
+
+---
+
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1beta1
+metadata:
+  name: calico-cni-plugin
+rules:
+  - apiGroups: [""]
+    resources:
+      - pods
+      - nodes
+    verbs:
+      - get
+
+---
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: calico-cni-plugin
+  namespace: kube-system
+
+---
+
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: ClusterRoleBinding
+metadata:
+  name: calico-kube-controllers
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: calico-kube-controllers
+subjects:
+- kind: ServiceAccount
+  name: calico-kube-controllers
+  namespace: kube-system
+
+---
+
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1beta1
+metadata:
+  name: calico-kube-controllers
+rules:
+  - apiGroups:
+    - ""
+    - extensions
+    resources:
+      - pods
+      - namespaces
+      - networkpolicies
+      - nodes
+    verbs:
+      - watch
+      - list
+
+---
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: calico-kube-controllers
+  namespace: kube-system
+EOF
+    fi
+
+local TEMPLATE=/srv/kubernetes/manifests/traefik-rbac.yaml
+    if [ ! -f $TEMPLATE ]; then
+        echo "TEMPLATE: $TEMPLATE"
+        mkdir -p $(dirname $TEMPLATE)
+        cat << EOF > $TEMPLATE
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1beta1
+metadata:
+  name: traefik-ingress-controller
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - services
+      - endpoints
+      - secrets
+    verbs:
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - extensions
+    resources:
+      - ingresses
+    verbs:
+      - get
+      - list
+      - watch
+---
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1beta1
+metadata:
+  name: traefik-ingress-controller
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: traefik-ingress-controller
+subjects:
+- kind: ServiceAccount
+  name: traefik-ingress-controller
+  namespace: kube-system
+EOF
+    fi
+
+local TEMPLATE=/srv/kubernetes/manifests/traefik-serviceaccount.yaml
+    if [ ! -f $TEMPLATE ]; then
+        echo "TEMPLATE: $TEMPLATE"
+        mkdir -p $(dirname $TEMPLATE)
+        cat << EOF > $TEMPLATE
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: traefik-ingress-controller
+  namespace: kube-system
+EOF
+    fi
+
+local TEMPLATE=/srv/kubernetes/manifests/traefik-deployment.yaml
+    if [ ! -f $TEMPLATE ]; then
+        echo "TEMPLATE: $TEMPLATE"
+        mkdir -p $(dirname $TEMPLATE)
+        cat << EOF > $TEMPLATE
+kind: Deployment
+apiVersion: extensions/v1beta1
+metadata:
+  name: traefik-ingress-controller
+  namespace: kube-system
+  labels:
+    k8s-app: traefik-ingress-lb
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      k8s-app: traefik-ingress-lb
+  template:
+    metadata:
+      labels:
+        k8s-app: traefik-ingress-lb
+        name: traefik-ingress-lb
+    spec:
+      serviceAccountName: traefik-ingress-controller
+      terminationGracePeriodSeconds: 60
+      containers:
+      - image: traefik
+        name: traefik-ingress-lb
+        args:
+        - --web
+        - --kubernetes
+EOF
+    fi
+local TEMPLATE=/srv/kubernetes/manifests/traefik-service.yaml
+    if [ ! -f $TEMPLATE ]; then
+        echo "TEMPLATE: $TEMPLATE"
+        mkdir -p $(dirname $TEMPLATE)
+        cat << EOF > $TEMPLATE
+kind: Service
+apiVersion: v1
+metadata:
+  name: traefik-ingress-service
+  namespace: kube-system
+spec:
+  selector:
+    k8s-app: traefik-ingress-lb
+  ports:
+  - nodePort: 30080
+    port: 80
+    protocol: TCP
+    targetPort: 80
+    name: web
+  - nodePort: 38080
+    port: 8080
+    protocol: TCP
+    targetPort: 8080
+    name: admin
+  type: NodePort
+EOF
+    fi
+
+local TEMPLATE=/srv/kubernetes/manifests/traefik-web-ui-service.yaml
+    if [ ! -f $TEMPLATE ]; then
+        echo "TEMPLATE: $TEMPLATE"
+        mkdir -p $(dirname $TEMPLATE)
+        cat << EOF > $TEMPLATE
+apiVersion: v1
+kind: Service
+metadata:
+  name: traefik-web-ui
+  namespace: kube-system
+spec:
+  selector:
+    k8s-app: traefik-ingress-lb
+  ports:
+  - name: web
+    port: 80
+    targetPort: 8080
+EOF
+    fi
+
+local TEMPLATE=/srv/kubernetes/manifests/traefik-web-ui-ingress.yaml
+    if [ ! -f $TEMPLATE ]; then
+        echo "TEMPLATE: $TEMPLATE"
+        mkdir -p $(dirname $TEMPLATE)
+        cat << EOF > $TEMPLATE
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: traefik-web-ui
+  namespace: kube-system
+spec:
+  rules:
+  - host: traefik-ui.bs.com
+    http:
+      paths:
+      - path: /
+        backend:
+          serviceName: traefik-web-ui
+          servicePort: web
 EOF
     fi
 }
@@ -1053,39 +2348,108 @@ function start_addons {
     done
 
     echo
+    echo "K8S: Cluster Role Binding"
+    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/kube-apiserver-crb.yaml
+    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/kubelet-crb.yaml
     echo "K8S: addon cluster admin"
-    curl --silent -H "Content-Type: application/yaml" -XPOST -d"$(cat /srv/kubernetes/manifests/add-on-cluster-admin-crb.yaml)" "http://127.0.0.1:8080/apis/rbac.authorization.k8s.io/v1beta1/clusterrolebindings" > /dev/null
+    # docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/add-on-cluster-admin-crb.yaml
     echo "K8S: DNS addon"
-    curl --silent -H "Content-Type: application/yaml" -XPOST -d"$(cat /srv/kubernetes/manifests/kube-dns-de.yaml)" "http://127.0.0.1:8080/apis/extensions/v1beta1/namespaces/kube-system/deployments" > /dev/null
-    curl --silent -H "Content-Type: application/yaml" -XPOST -d"$(cat /srv/kubernetes/manifests/kube-dns-svc.yaml)" "http://127.0.0.1:8080/api/v1/namespaces/kube-system/services" > /dev/null
-    curl --silent -H "Content-Type: application/yaml" -XPOST -d"$(cat /srv/kubernetes/manifests/kube-dns-autoscaler-de.yaml)" "http://127.0.0.1:8080/apis/extensions/v1beta1/namespaces/kube-system/deployments" > /dev/null
+    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/coredns-service.yaml
+    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/coredns-serviceaccount.yaml
+    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/coredns-configmap.yaml
+    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/coredns-rbac.yaml
+    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/coredns-deployment.yaml
+    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/kube-dns-autoscaler-serviceaccount.yaml
+    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/kube-dns-autoscaler-rbac.yaml
+    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/kube-dns-autoscaler-deployment.yaml
     echo "K8S: Heapster addon"
-    curl --silent -H "Content-Type: application/yaml" -XPOST -d"$(cat /srv/kubernetes/manifests/heapster-de.yaml)" "http://127.0.0.1:8080/apis/extensions/v1beta1/namespaces/kube-system/deployments" > /dev/null
-    curl --silent -H "Content-Type: application/yaml" -XPOST -d"$(cat /srv/kubernetes/manifests/heapster-svc.yaml)" "http://127.0.0.1:8080/api/v1/namespaces/kube-system/services" > /dev/null
+    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/heapster-service.yaml
+    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/heapster-serviceaccount.yaml
+    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/heapster-configmap.yaml
+    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/heapster-rbac.yaml
+    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/heapster-deployment.yaml
+    echo "K8S: Heapster graphana addon"
+    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/heapster-influxdb-service.yaml
+    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/heapster-grafana-service.yaml
+    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/heapster-influxdb-grafana-deployment.yaml
     echo "K8S: Dashboard addon"
-    curl --silent -H "Content-Type: application/yaml" -XPOST -d"$(cat /srv/kubernetes/manifests/kube-dashboard-de.yaml)" "http://127.0.0.1:8080/apis/extensions/v1beta1/namespaces/kube-system/deployments" > /dev/null
-    curl --silent -H "Content-Type: application/yaml" -XPOST -d"$(cat /srv/kubernetes/manifests/kube-dashboard-svc.yaml)" "http://127.0.0.1:8080/api/v1/namespaces/kube-system/services" > /dev/null
+    if ! curl --silent http://127.0.0.1:8080/api/v1/namespaces/kube-system/secrets | grep kubernetes-dashboard-cert ; then 
+      docker run --rm --net=host \
+      -v /etc/kubernetes/ssl/dashboard.crt:/certs/dashboard.crt \
+      -v /etc/kubernetes/ssl/dashboard.key:/certs/dashboard.key \
+      $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl create secret generic kubernetes-dashboard-certs --from-file=/certs -n kube-system
+    fi
+    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/kube-dashboard-serviceaccount.yaml
+    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/kube-dashboard-rbac.yaml
+    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/kube-dashboard-secret.yaml
+    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/kube-dashboard-configmap.yaml
+    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/kube-dashboard-service.yaml
+    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/kube-dashboard-deployment.yaml
+    echo "K8S: Traefik addon"
+    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/traefik-serviceaccount.yaml
+    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/traefik-rbac.yaml
+    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/traefik-service.yaml
+    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/traefik-deployment.yaml
+    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/traefik-web-ui-service.yaml
+    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/traefik-web-ui-ingress.yaml
 }
 
 function start_calico {
-    echo "Waiting for Kubernetes API..."
-    # wait for the API
+    GREEN='\033[0;32m'
+    RED='\033[0;31m'
+    YELLOW='\033[0;33m'
+    NC='\033[0m'
+
+    printf "Waiting for Kubernetes API and extensions..."
+    # wait for the API and extensions such as daemonset
     until curl --silent "http://127.0.0.1:8080/version/"
     do
+        printf "${YELLOW}Kubernetes API and extensions not ready for Calico${NC}"
         sleep 5
     done
-    echo "Deploying Calico"
+    printf "${GREEN}Kubernetes API and extensions ready for Calico${NC}"
+
+    until curl --silent "http://127.0.0.1:8080/apis/extensions/v1beta1" | grep daemonset
+    do
+        printf "${YELLOW}Waitfing to deploy Calico${NC}"
+        sleep 5
+    done
+    printf "${GREEN}Deploying Flannel${NC}"
     # Deploy Calico
     #TODO: change to rkt once this is resolved (https://github.com/coreos/rkt/issues/3181)
     docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/calico.yaml
 }
 
+function start_flannel {
+    GREEN='\033[0;32m'
+    RED='\033[0;31m'
+    YELLOW='\033[0;33m'
+    NC='\033[0m'
+
+    printf "Waiting for Kubernetes API and extensions..."
+    # wait for the API and extensions such as daemonset
+    until curl --silent "http://127.0.0.1:8080/version/"
+    do
+        printf "${YELLOW}Kubernetes API and extensions not ready for Flannel${NC}"
+        sleep 5
+    done
+    printf "${GREEN}Kubernetes API and extensions ready for Flannel${NC}"
+
+    until curl --silent "http://127.0.0.1:8080/apis/extensions/v1beta1" | grep daemonset
+    do
+        printf "${YELLOW}Waitfing to deploy Flannel${NC}"
+        sleep 5
+    done
+    printf "${GREEN}Deploying Flannel${NC}"
+    # Deploy flannel
+    docker run --rm --net=host -v /srv/kubernetes/manifests:/host/manifests $HYPERKUBE_IMAGE_REPO:$K8S_VER /hyperkube kubectl apply -f /host/manifests/flannel.yaml
+}
+
 init_config
 init_templates
+init_flannel
 
 chmod +x /opt/bin/host-rkt
-
-init_flannel
 
 systemctl stop update-engine; systemctl mask update-engine
 
@@ -1096,13 +2460,16 @@ if [ $CONTAINER_RUNTIME = "rkt" ]; then
         systemctl enable rkt-api
 fi
 
-systemctl enable flanneld; systemctl start flanneld
-
 systemctl enable kubelet; systemctl start kubelet
+
+# start_flannel
 
 if [ $USE_CALICO = "true" ]; then
         start_calico
+else
+        start_flannel
 fi
 
 start_addons
+
 echo "DONE"

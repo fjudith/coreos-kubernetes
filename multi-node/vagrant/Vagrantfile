@@ -11,7 +11,7 @@ Vagrant.require_version ">= 1.6.0"
 
 $update_channel = "stable"
 $controller_count = 1
-$controller_vm_memory = 2048
+$controller_vm_memory = 1024
 $controller_vm_vcpus = 1
 $worker_count = 1
 $worker_vm_memory = 2048
@@ -19,6 +19,7 @@ $worker_vm_vcpus = 1
 $etcd_count = 1
 $etcd_vm_memory = 512
 $node_disk_sizes = [4, 5, 6] # size in GB of each disk
+
 
 CONFIG = File.expand_path("config.rb")
 if File.exist?(CONFIG)
@@ -28,6 +29,8 @@ end
 if $worker_vm_memory < 1024
   puts "Workers should have at least 1024 MB of memory"
 end
+
+flannel_iface = "eth1"
 
 CONTROLLER_CLUSTER_IP="10.3.0.1"
 
@@ -55,17 +58,34 @@ etcd_endpoints = etcdIPs.map.with_index{ |ip, i| "http://#{ip}:2379" }.join(",")
 
 # Generate root CA
 FileUtils.mkdir_p("ssl")
-system('bash', '-c', "./../../lib/init-ssl-ca.sh ssl") or abort ("failed generating SSL artifacts")
+system('bash', '-c', "./../../lib/cfssl.sh ssl ca kube-ca") or abort ("failed generating SSL artifacts")
+
+# Generate etcd key/cert
+system('bash', '-c', "./../../lib/cfssl.sh ssl etcd etcd #{etcdIPs}") or abort("failed generating admin SSL artifacts")
 
 # Generate admin key/cert
-system('bash', '-c', "./../../lib/init-ssl.sh ssl admin kube-admin") or abort("failed generating admin SSL artifacts")
+system('bash', '-c', "./../../lib/cfssl.sh ssl admin kube-admin") or abort("failed generating admin SSL artifacts")
+
+# Generate Kubernes-Dashboard Token
+system('bash', '-c', "./../../lib/cfssl.sh ssl dashboard kubernets-dashboard") or abort("failed generating Kubernetes Dashboard SSL artifacts")
+
+# Generate Bootstrap Token
+FileUtils.mkdir_p("token")
+system('bash', '-c', "./../../lib/init-token.sh token") or abort ("failed generating Bootstrap token artifacts")
+
+# Generate Encryption key Token
+system('bash', '-c', "./../../lib/init-encryptionkey.sh token") or abort ("failed generating Encryption key artifacts")
 
 def provisionMachineSSL(machine,certBaseName,cn,ipAddrs)
   tarFile = "ssl/#{cn}.tar"
-  ipString = ipAddrs.map.with_index { |ip, i| "IP.#{i+1}=#{ip}"}.join(",")
-  system('bash', '-c', "./../../lib/init-ssl.sh ssl #{certBaseName} #{cn} #{ipString}") or abort("failed generating #{cn} SSL artifacts")
+  ipString = ipAddrs.map.with_index { |ip, i| "#{ip}"}.join(",")
+  system('bash', '-c', "./../../lib/cfssl.sh ssl #{certBaseName} #{cn} #{ipString}") or abort("failed generating #{cn} SSL artifacts")
   machine.vm.provision :file, :source => tarFile, :destination => "/tmp/ssl.tar"
   machine.vm.provision :shell, :inline => "mkdir -p /etc/kubernetes/ssl && tar -C /etc/kubernetes/ssl -xf /tmp/ssl.tar", :privileged => true
+  # Copy SSL CA Private Key for Kubernetes internal certificate signing
+  cakeyFile = "ssl/ca-key.pem"
+  machine.vm.provision :file, :source => cakeyFile, :destination => "/tmp/ca-key.pem"
+  machine.vm.provision :shell, :inline => "mv /tmp/ca-key.pem /etc/kubernetes/ssl/", :privileged => true
 end
 
 Vagrant.configure("2") do |config|
@@ -89,6 +109,7 @@ Vagrant.configure("2") do |config|
   config.vm.provider :virtualbox do |v|
     # On VirtualBox, we don't have guest additions or a functional vboxsf
     # in CoreOS, so tell Vagrant that so it can be smarter.
+    v.linked_clone = true if Gem::Version.new(Vagrant::VERSION) >= Gem::Version.new('1.8.0')
     v.check_guest_additions = false
     v.functional_vboxsf     = false
   end
@@ -101,13 +122,16 @@ Vagrant.configure("2") do |config|
   ["vmware_fusion", "vmware_workstation"].each do |vmware|
     config.vm.provider vmware do |v|
       v.vmx['numvcpus'] = 1
+      v.vmx['tools.synctime'] = "TRUE"
       v.gui = false
+      flannel_iface = "ens34"
     end
   end
 
   config.vm.provider :virtualbox do |vb|
     vb.cpus = 1
     vb.gui = false
+    flannel_iface = "eth1"
   end
 
    config.vm.provider :parallels do |prl|
@@ -116,13 +140,6 @@ Vagrant.configure("2") do |config|
 
   (1..$etcd_count).each do |i|
     config.vm.define vm_name = "e%d" % i do |etcd|
-
-      data = YAML.load(IO.readlines(ETCD_CLOUD_CONFIG_PATH)[1..-1].join)
-      data['coreos']['etcd2']['initial-cluster'] = initial_etcd_cluster
-      data['coreos']['etcd2']['name'] = vm_name
-      etcd_config_file = Tempfile.new('etcd_config', :binmode => true)
-      etcd_config_file.write("#cloud-config\n#{data.to_yaml}")
-      etcd_config_file.close
 
       etcd.vm.hostname = vm_name
 
@@ -142,7 +159,12 @@ Vagrant.configure("2") do |config|
 
       etcd.vm.network :private_network, ip: etcdIP(i)
 
-      etcd.vm.provision :file, :source => etcd_config_file.path, :destination => "/tmp/vagrantfile-user-data"
+      etcd.vm.provision :file, :source => ETCD_CLOUD_CONFIG_PATH, :destination => "/tmp/vagrantfile-user-data"
+      etcd.vm.provision :shell, :privileged => true,
+      inline: <<-EOF
+        sed -i"*" "s|{{ETCD_INITIAL_CLUSTER}}|#{initial_etcd_cluster}|g" /tmp/vagrantfile-user-data
+        sed -i"*" "s|{{ETCD_NODE_NAME}}|#{vm_name}|g" /tmp/vagrantfile-user-data
+      EOF
       etcd.vm.provision :shell, :inline => "mv /tmp/vagrantfile-user-data /var/lib/coreos-vagrant/", :privileged => true
     end
   end
@@ -153,6 +175,7 @@ Vagrant.configure("2") do |config|
 
       env_file = Tempfile.new('env_file', :binmode => true)
       env_file.write("ETCD_ENDPOINTS=#{etcd_endpoints}\n")
+      env_file.write("FLANNEL_IFACE=#{flannel_iface}\n")
       env_file.close
 
       controller.vm.hostname = vm_name
@@ -180,12 +203,37 @@ Vagrant.configure("2") do |config|
       attach_volumes(controller, $node_disk_sizes)
 
       # Each controller gets the same cert
+      provisionMachineSSL(controller,"master","master-#{controllerIP}",controllerIPs)
       provisionMachineSSL(controller,"apiserver","kube-apiserver-#{controllerIP}",controllerIPs)
+      provisionMachineSSL(controller,"kube-proxy","kube-proxy-#{controllerIP}",controllerIPs)
+      provisionMachineSSL(controller,"flanneld","flanneld-#{controllerIP}",controllerIPs)
+
+      # Copy SSL CA Private Key for Kubernetes Dashboard
+      dashboardKey = "ssl/dashboard-key.pem"
+      dashboardCert = "ssl/dashboard.pem"
+      controller.vm.provision :file, :source => dashboardKey, :destination => "/tmp/dashboard.key"
+      controller.vm.provision :file, :source => dashboardCert, :destination => "/tmp/dashboard.crt"
+      controller.vm.provision :shell, :inline => "mv /tmp/dashboard.* /etc/kubernetes/ssl/", :privileged => true
+
+      # Copy Token for Kubernetes ApiServer
+      tokenFile = "token/token.csv"
+      controller.vm.provision :file, :source => tokenFile, :destination => "/tmp/token.csv"
+      controller.vm.provision :shell, :inline => "mv /tmp/token.csv /etc/kubernetes/", :privileged => true
+
+      # Copy Encryption key for Kubernetes ApiServer
+      tokenFile = "token/encryption-key.txt"
+      controller.vm.provision :file, :source => tokenFile, :destination => "/tmp/encryption-key.txt"
+      controller.vm.provision :shell, :inline => "mv /tmp/encryption-key.txt /etc/kubernetes/", :privileged => true
 
       controller.vm.provision :file, :source => env_file, :destination => "/tmp/coreos-kube-options.env"
       controller.vm.provision :shell, :inline => "mkdir -p /run/coreos-kubernetes && mv /tmp/coreos-kube-options.env /run/coreos-kubernetes/options.env", :privileged => true
 
       controller.vm.provision :file, :source => CONTROLLER_CLOUD_CONFIG_PATH, :destination => "/tmp/vagrantfile-user-data"
+      controller.vm.provision :shell, :privileged => true,
+      inline: <<-EOF
+        sed -i"*" "s|\\(export ETCD_ENDPOINTS=\\)|\\1#{etcd_endpoints}|g" /tmp/vagrantfile-user-data
+        sed -i"*" "s|\\(export FLANNEL_IFACE=\\)|\\1#{flannel_iface}|g" /tmp/vagrantfile-user-data
+      EOF
       controller.vm.provision :shell, :inline => "mv /tmp/vagrantfile-user-data /var/lib/coreos-vagrant/", :privileged => true
     end
   end
@@ -196,7 +244,8 @@ Vagrant.configure("2") do |config|
 
       env_file = Tempfile.new('env_file', :binmode => true)
       env_file.write("ETCD_ENDPOINTS=#{etcd_endpoints}\n")
-      env_file.write("CONTROLLER_ENDPOINT=https://#{controllerIPs[0]}\n") #TODO(aaron): LB or DNS across control nodes
+      env_file.write("CONTROLLER_ENDPOINT=https://#{controllerIPs[0]}:6443\n") #TODO(aaron): LB or DNS across control nodes
+      env_file.write("FLANNEL_IFACE=#{flannel_iface}\n")
       env_file.close
 
       ["vmware_fusion", "vmware_workstation"].each do |vmware|
@@ -221,12 +270,25 @@ Vagrant.configure("2") do |config|
 
       attach_volumes(worker, $node_disk_sizes)
 
-      provisionMachineSSL(worker,"worker","kube-worker-#{workerIP}",[workerIP])
+      provisionMachineSSL(worker,"node","node-#{workerIP}",[workerIP])
+      provisionMachineSSL(worker,"kube-proxy","kube-proxy-#{workerIP}",[workerIP])
+      provisionMachineSSL(worker,"flanneld","flanneld-#{workerIP}",[workerIP])
+
+      # Copy Token for Kubernetes Kube-Proxy
+      tokenFile = "token/token.csv"
+      worker.vm.provision :file, :source => tokenFile, :destination => "/tmp/token.csv"
+      worker.vm.provision :shell, :inline => "mv /tmp/token.csv /etc/kubernetes/", :privileged => true
 
       worker.vm.provision :file, :source => env_file, :destination => "/tmp/coreos-kube-options.env"
       worker.vm.provision :shell, :inline => "mkdir -p /run/coreos-kubernetes && mv /tmp/coreos-kube-options.env /run/coreos-kubernetes/options.env", :privileged => true
 
       worker.vm.provision :file, :source => WORKER_CLOUD_CONFIG_PATH, :destination => "/tmp/vagrantfile-user-data"
+      worker.vm.provision :shell, :privileged => true,
+      inline: <<-EOF
+        sed -i"*" "s|\\(export ETCD_ENDPOINTS=\\)|\\1#{etcd_endpoints}|g" /tmp/vagrantfile-user-data
+        sed -i"*" "s|\\(export CONTROLLER_ENDPOINT=\\)|\\1https://#{controllerIPs[0]}|g" /tmp/vagrantfile-user-data
+        sed -i"*" "s|\\(export FLANNEL_IFACE=\\)|\\1#{flannel_iface}|g" /tmp/vagrantfile-user-data
+      EOF
       worker.vm.provision :shell, :inline => "mv /tmp/vagrantfile-user-data /var/lib/coreos-vagrant/", :privileged => true
     end
   end
